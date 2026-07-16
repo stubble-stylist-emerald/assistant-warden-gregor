@@ -207,6 +207,37 @@ describe("main alert panel", () => {
 
     expect(JSON.stringify(components)).toContain("Requires the bot to have Manage Events permission");
   });
+
+  it("shows the mention channel as Not configured by default", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    const panel = buildMainPanel(repository, "guild-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    expect(JSON.stringify(components)).toContain("Not configured");
+  });
+
+  it("shows the mention channel when configured", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.setMentionChannelId("guild-1", "channel-123");
+
+    const panel = buildMainPanel(repository, "guild-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    expect(JSON.stringify(components)).toContain("<#channel-123>");
+  });
+
+  it("includes a channel select menu for mention channel", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    const panel = buildMainPanel(repository, "guild-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    expect(JSON.stringify(components)).toContain("eventAlerts:setMentionChannel");
+  });
 });
 
 describe("subscription panel", () => {
@@ -322,6 +353,38 @@ describe("subscription panel", () => {
     expect(movedAlert?.id).toBe(allAlert.id);
     expect(repository.getAlert(interestedAlert.id)).toBeNull();
     expect(repository.listSubscribedAlerts("guild-1", "user-1").map((alert) => alert.id)).toEqual([allAlert.id]);
+  });
+
+  it("includes a mention notifications toggle in the subscription panel", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    const panel = buildSubscriptionPanel(repository, "guild-1", "user-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    const buttonRow = components[components.length - 1];
+    const toggleButton = buttonRow.components.find(
+      (c: { custom_id: string }) => c.custom_id === "subscriptions:toggleMentionNotifications"
+    );
+    expect(toggleButton).toBeDefined();
+    expect(toggleButton.label).toBe("@mentions: On");
+    expect(toggleButton.style).toBe(ButtonStyle.Success);
+  });
+
+  it("shows mention toggle as Off when disabled", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.setMentionNotificationsEnabled("guild-1", "user-1", false);
+
+    const panel = buildSubscriptionPanel(repository, "guild-1", "user-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    const buttonRow = components[components.length - 1];
+    const toggleButton = buttonRow.components.find(
+      (c: { custom_id: string }) => c.custom_id === "subscriptions:toggleMentionNotifications"
+    );
+    expect(toggleButton.label).toBe("@mentions: Off");
+    expect(toggleButton.style).toBe(ButtonStyle.Secondary);
   });
 });
 

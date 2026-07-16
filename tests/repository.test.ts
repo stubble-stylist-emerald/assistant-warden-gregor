@@ -298,3 +298,67 @@ describe("auto-start settings", () => {
     expect(repository.listConfiguredGuildIds()).toEqual(["guild-1"]);
   });
 });
+
+describe("mention notifications", () => {
+  it("defaults to enabled for any user", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    expect(repository.isMentionNotificationsEnabled("guild-1", "user-1")).toBe(true);
+  });
+
+  it("toggles mention notifications off and on", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    repository.setMentionNotificationsEnabled("guild-1", "user-1", false);
+    expect(repository.isMentionNotificationsEnabled("guild-1", "user-1")).toBe(false);
+
+    repository.setMentionNotificationsEnabled("guild-1", "user-1", true);
+    expect(repository.isMentionNotificationsEnabled("guild-1", "user-1")).toBe(true);
+  });
+
+  it("is scoped per guild", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.ensureGuild("guild-2");
+
+    repository.setMentionNotificationsEnabled("guild-1", "user-1", false);
+
+    expect(repository.isMentionNotificationsEnabled("guild-1", "user-1")).toBe(false);
+    expect(repository.isMentionNotificationsEnabled("guild-2", "user-1")).toBe(true);
+  });
+});
+
+describe("mention channel", () => {
+  it("returns null when no channel is configured", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    expect(repository.getMentionChannelId("guild-1")).toBeNull();
+  });
+
+  it("sets and retrieves the mention channel", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    repository.setMentionChannelId("guild-1", "channel-123");
+    expect(repository.getMentionChannelId("guild-1")).toBe("channel-123");
+  });
+
+  it("clears the mention channel when set to null", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    repository.setMentionChannelId("guild-1", "channel-123");
+    repository.setMentionChannelId("guild-1", null);
+
+    expect(repository.getMentionChannelId("guild-1")).toBeNull();
+  });
+
+  it("returns null for unconfigured guild", () => {
+    const repository = createRepository();
+
+    expect(repository.getMentionChannelId("non-existent")).toBeNull();
+  });
+});

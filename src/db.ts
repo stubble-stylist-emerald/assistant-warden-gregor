@@ -16,7 +16,7 @@ export function openDatabase(databasePath: string): Database.Database {
   return db;
 }
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // Migrate sequentially from currentVersion to targetVersion inside one transaction.
 // Unknown versions (non-zero, non-chain) are rejected with an error instead of
@@ -52,6 +52,10 @@ function migrateSchema(db: Database.Database, fromVersion: number, toVersion: nu
 
     if (fromVersion <= 4 && toVersion >= 5) {
       applyV5Migration(db);
+    }
+
+    if (fromVersion <= 5 && toVersion >= 6) {
+      applyV6Migration(db);
     }
 
     db.pragma(`user_version = ${toVersion}`);
@@ -123,4 +127,28 @@ function applyV5Migration(db: Database.Database): void {
       throw error;
     }
   }
+}
+
+function applyV6Migration(db: Database.Database): void {
+  // Idempotent column addition — ignore if the column already exists.
+  try {
+    db.exec("ALTER TABLE guild_settings ADD COLUMN mention_channel_id TEXT");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("duplicate column name") && !message.includes("already exists")) {
+      throw error;
+    }
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      user_id TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      mention_notifications_enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, guild_id),
+      FOREIGN KEY (guild_id) REFERENCES guild_settings(guild_id) ON DELETE CASCADE
+    );
+  `);
 }

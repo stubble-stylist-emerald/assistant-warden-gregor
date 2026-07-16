@@ -1,10 +1,13 @@
 import {
+  ChannelType,
   EmbedBuilder,
   GuildScheduledEventStatus,
   type Client,
   type GuildScheduledEvent,
-  type MessageCreateOptions
+  type MessageCreateOptions,
+  type TextChannel
 } from "discord.js";
+import { parseMentionedUsers, resolveRoleMembers } from "./mentions";
 import { formatOffset, offsetToMilliseconds } from "./offset";
 import type { AlertRepository } from "./repository";
 import type { Alert, DueAlert, FailedRecipient, ScheduledEventSnapshot } from "./types";
@@ -15,6 +18,7 @@ export function findDueAlerts(input: {
   events: ScheduledEventSnapshot[];
   alertsByGuild: Map<string, Alert[]>;
   wasSent: (guildId: string, eventId: string, alertId: string) => boolean;
+  isMentionEnabled: (guildId: string, userId: string) => boolean;
 }): DueAlert[] {
   const dueAlerts: DueAlert[] = [];
 
@@ -30,12 +34,24 @@ export function findDueAlerts(input: {
         alert.eventTarget === "all"
           ? alert.recipientIds
           : alert.recipientIds.filter((userId) => event.interestedUserIds.includes(userId));
-      if (targetRecipientIds.length === 0 || !alert.enabled || !isAlertDue(event.scheduledStartAt, alert, input.now)) {
+
+      // Add mentioned users who have mention notifications enabled and aren't already recipients.
+      const mentionRecipients =
+        alert.eventTarget !== "all"
+          ? event.mentionedUserIds.filter(
+              (userId) =>
+                input.isMentionEnabled(event.guildId, userId) &&
+                !targetRecipientIds.includes(userId)
+            )
+          : [];
+
+      const allRecipientIds = [...targetRecipientIds, ...mentionRecipients];
+      if (allRecipientIds.length === 0 || !alert.enabled || !isAlertDue(event.scheduledStartAt, alert, input.now)) {
         continue;
       }
 
       if (!input.wasSent(event.guildId, event.id, alert.id)) {
-        dueAlerts.push({ guildId: event.guildId, event, alert, recipientIds: targetRecipientIds });
+        dueAlerts.push({ guildId: event.guildId, event, alert, recipientIds: allRecipientIds });
       }
     }
   }
@@ -68,11 +84,43 @@ export async function runAlertPoll(client: Client, repository: AlertRepository, 
     now,
     events,
     alertsByGuild,
-    wasSent: (guildId, eventId, alertId) => repository.hasSentAlert(guildId, eventId, alertId)
+    wasSent: (guildId, eventId, alertId) => repository.hasSentAlert(guildId, eventId, alertId),
+    isMentionEnabled: (guildId, userId) => repository.isMentionNotificationsEnabled(guildId, userId)
   });
 
   for (const dueAlert of dueAlerts) {
     await sendDueAlert(client, repository, dueAlert);
+  }
+
+  // Post mention notifications to configured channels. One message per event
+  // regardless of how many alert offsets fired for it.
+  const postedChannelEvents = new Set<string>();
+  for (const dueAlert of dueAlerts) {
+    const eventKey = `${dueAlert.guildId}:${dueAlert.event.id}`;
+    if (
+      dueAlert.event.mentionedUserIds.length === 0 ||
+      postedChannelEvents.has(eventKey)
+    ) {
+      continue;
+    }
+
+    const channelId = repository.getMentionChannelId(dueAlert.guildId);
+    if (!channelId) {
+      continue;
+    }
+
+    try {
+      const channel = await client.channels.fetch(channelId);
+      if (channel?.type === ChannelType.GuildText) {
+        await (channel as TextChannel).send(buildMentionChannelMessage(dueAlert));
+        postedChannelEvents.add(eventKey);
+      }
+    } catch (error) {
+      console.warn(
+        `[mentions] Failed to post channel notification for event ${dueAlert.event.id} in guild ${dueAlert.guildId}:`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
   }
 
   // Auto-start events whose start time has arrived. Each call is wrapped so one
@@ -104,14 +152,41 @@ async function fetchScheduledEvents(client: Client, repository: AlertRepository)
     }
 
     const events = await guild.scheduledEvents.fetch();
+
+    // Collect all role IDs across events so we resolve members once per guild.
+    const allRoleIds = new Set<string>();
+    const perEventMentions = new Map<string, { directMentions: string[]; roleIds: string[] }>();
     for (const [, event] of events) {
+      const { userIds: directMentions, roleIds } = parseMentionedUsers(event.description);
+      perEventMentions.set(event.id, { directMentions, roleIds });
+      for (const roleId of roleIds) {
+        allRoleIds.add(roleId);
+      }
+    }
+
+    const roleMembers = await resolveRoleMembers(guild, Array.from(allRoleIds));
+
+    for (const [, event] of events) {
+      const mentions = perEventMentions.get(event.id) ?? { directMentions: [], roleIds: [] };
+      const mentionedUserIds = Array.from(
+        new Set([
+          ...mentions.directMentions,
+          ...roleMembers.filter((userId) => {
+            // Only include role members whose role was mentioned for this specific event.
+            const member = guild.members.cache.get(userId);
+            return member && mentions.roleIds.some((roleId) => member.roles.cache.has(roleId));
+          })
+        ])
+      );
+
       snapshots.push({
         id: event.id,
         guildId,
         name: event.name,
         scheduledStartAt: event.scheduledStartAt,
         status: event.status,
-        interestedUserIds: await fetchInterestedUserIds(event)
+        interestedUserIds: await fetchInterestedUserIds(event),
+        mentionedUserIds
       });
     }
   }
@@ -233,5 +308,20 @@ export function buildAlertMessage(dueAlert: DueAlert): MessageCreateOptions {
   return {
     content: "Event reminder",
     embeds: [embed]
+  };
+}
+
+// Channel notification message posted to the guild's configured mention channel.
+// Discord renders @mentions in the event description natively, so we don't
+// need to reconstruct them — just link to the event.
+function buildMentionChannelMessage(dueAlert: DueAlert): MessageCreateOptions {
+  const startTimestamp = Math.floor((dueAlert.event.scheduledStartAt?.getTime() ?? Date.now()) / 1000);
+  const mentionedCount = dueAlert.event.mentionedUserIds.length;
+
+  return {
+    content: [
+      `**${dueAlert.event.name}** starts <t:${startTimestamp}:R>`,
+      `— you were @mentioned in the event description.`
+    ].join(" ")
   };
 }

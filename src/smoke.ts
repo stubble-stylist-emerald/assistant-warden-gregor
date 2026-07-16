@@ -15,6 +15,10 @@ async function main(): Promise<void> {
   const autoStartGuildIds = new AlertRepository(db).listAutoStartGuildIds();
   const noAutoStartGuildsByDefault = autoStartGuildIds.length === 0;
 
+  // Verify the v6 migration created the user_settings table.
+  const userSettingsColumns = db.pragma("table_info(user_settings)") as Array<{ name: string }>;
+  const hasUserSettingsTable = userSettingsColumns.length > 0;
+
   db.close();
 
   const rest = new REST({ version: "10" }).setToken(config.discordToken);
@@ -74,6 +78,7 @@ async function main(): Promise<void> {
         databaseOpened: true,
         hasAutoStartColumn,
         noAutoStartGuildsByDefault,
+        hasUserSettingsTable,
         hasEventAlertsCommand,
         hasSubscribeCommand,
         ...result
@@ -82,6 +87,10 @@ async function main(): Promise<void> {
       2
     )
   );
+
+  if (!hasUserSettingsTable) {
+    throw new Error("Database migration v6 did not apply: user_settings table is missing.");
+  }
 
   if (!hasAutoStartColumn) {
     throw new Error("Database migration v5 did not apply: auto_start_enabled column is missing.");

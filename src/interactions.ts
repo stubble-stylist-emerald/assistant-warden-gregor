@@ -2,6 +2,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelSelectMenuBuilder,
+  ChannelType,
   ComponentType,
   ContainerBuilder,
   MessageFlags,
@@ -17,6 +19,7 @@ import {
   TextInputStyle,
   UserSelectMenuBuilder,
   type ButtonInteraction,
+  type ChannelSelectMenuInteraction,
   type ChatInputCommandInteraction,
   type Interaction,
   type InteractionReplyOptions,
@@ -38,12 +41,15 @@ const IDS = {
   confirmClearHistory: "eventAlerts:confirmClearHistory",
   history: "eventAlerts:history",
   back: "eventAlerts:back",
-  toggleAutoStart: "eventAlerts:toggleAutoStart"
+  toggleAutoStart: "eventAlerts:toggleAutoStart",
+  setMentionChannel: "eventAlerts:setMentionChannel",
+  clearMentionChannel: "eventAlerts:clearMentionChannel"
 } as const;
 
 const SUBSCRIPTION_IDS = {
   add: "subscriptions:add",
-  modalAdd: "subscriptions:modal:add"
+  modalAdd: "subscriptions:modal:add",
+  toggleMentionNotifications: "subscriptions:toggleMentionNotifications"
 } as const;
 
 const HISTORY_PAGE_SIZE = 5;
@@ -81,6 +87,11 @@ export async function handleInteraction(interaction: Interaction, repository: Al
 
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith("subscriptions:eventTarget:")) {
     await handleSubscriptionEventTargetSelect(interaction, repository);
+    return;
+  }
+
+  if (interaction.isChannelSelectMenu() && interaction.customId === IDS.setMentionChannel) {
+    await handleMentionChannelSelect(interaction, repository);
     return;
   }
 
@@ -130,6 +141,20 @@ async function handleSubscriptionEventTargetSelect(
 
 export function canConfigureAlerts(permissions: Readonly<PermissionsBitFieldType> | null | undefined): boolean {
   return Boolean(permissions?.has(PermissionsBitField.Flags.ManageEvents));
+}
+
+async function handleMentionChannelSelect(
+  interaction: ChannelSelectMenuInteraction,
+  repository: AlertRepository
+): Promise<void> {
+  const guildId = await requireConfigurableGuild(interaction);
+  if (!guildId) {
+    return;
+  }
+
+  const channelId = interaction.values[0];
+  repository.setMentionChannelId(guildId, channelId);
+  await interaction.update(buildMainPanel(repository, guildId, interaction.user.id));
 }
 
 async function handleEventAlertsCommand(
@@ -266,6 +291,12 @@ async function handleEventAlertsButton(interaction: ButtonInteraction, repositor
     await interaction.update(buildMainPanel(repository, guildId, interaction.user.id));
     return;
   }
+
+  if (interaction.customId === IDS.clearMentionChannel) {
+    repository.setMentionChannelId(guildId, null);
+    await interaction.update(buildMainPanel(repository, guildId, interaction.user.id));
+    return;
+  }
 }
 
 async function handleSubscriptionButton(interaction: ButtonInteraction, repository: AlertRepository): Promise<void> {
@@ -278,6 +309,13 @@ async function handleSubscriptionButton(interaction: ButtonInteraction, reposito
 
   if (interaction.customId === SUBSCRIPTION_IDS.add) {
     await interaction.showModal(buildSubscriptionOffsetModal());
+    return;
+  }
+
+  if (interaction.customId === SUBSCRIPTION_IDS.toggleMentionNotifications) {
+    const enabled = repository.isMentionNotificationsEnabled(guildId, interaction.user.id);
+    repository.setMentionNotificationsEnabled(guildId, interaction.user.id, !enabled);
+    await interaction.update(buildSubscriptionPanel(repository, guildId, interaction.user.id));
     return;
   }
 
@@ -497,6 +535,7 @@ async function requireConfigurableGuild(
     | UserSelectMenuInteraction
     | ButtonInteraction
     | ModalSubmitInteraction
+    | ChannelSelectMenuInteraction
 ): Promise<string | null> {
   if (!interaction.guildId) {
     await interaction.reply({ content: "Use this command in a server.", flags: MessageFlags.Ephemeral });
@@ -594,7 +633,7 @@ export function buildMainPanel(
         ].join("\n")
       )
     );
-  const components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder>> = [headerContainer];
+  const components: Array<ContainerBuilder | ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<ChannelSelectMenuBuilder>> = [headerContainer];
 
   if (alerts.length === 0) {
     headerContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent("No alerts configured."));
@@ -619,6 +658,33 @@ export function buildMainPanel(
   }
 
   headerContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+
+  // Mention channel configuration.
+  const mentionChannelId = repository.getMentionChannelId(guildId);
+  const mentionChannelLabel = mentionChannelId ? `<#${mentionChannelId}>` : "Not configured";
+  headerContainer.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`**Mention channel**: ${mentionChannelLabel}`)
+  );
+
+  const channelSelectRow = new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId(IDS.setMentionChannel)
+      .setPlaceholder("Select a channel for @mention notifications")
+      .setChannelTypes([ChannelType.GuildText])
+      .setMinValues(1)
+      .setMaxValues(1)
+  );
+  components.push(channelSelectRow);
+
+  if (mentionChannelId) {
+    const clearRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(IDS.clearMentionChannel)
+        .setLabel("Clear mention channel")
+        .setStyle(ButtonStyle.Danger)
+    );
+    components.push(clearRow);
+  }
 
   const autoStartEnabled = repository.isAutoStartEnabled(guildId);
   const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -680,8 +746,13 @@ export function buildSubscriptionPanel(
 
   headerContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
+  const mentionEnabled = repository.isMentionNotificationsEnabled(guildId, userId);
   const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(SUBSCRIPTION_IDS.add).setLabel("Create alert").setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId(SUBSCRIPTION_IDS.add).setLabel("Create alert").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(SUBSCRIPTION_IDS.toggleMentionNotifications)
+      .setLabel(mentionEnabled ? "@mentions: On" : "@mentions: Off")
+      .setStyle(mentionEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
   );
 
   components.push(buttonRow);

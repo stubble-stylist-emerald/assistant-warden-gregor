@@ -329,6 +329,41 @@ export class AlertRepository {
       .all() as Array<{ guild_id: string }>;
     return rows.map((row) => row.guild_id);
   }
+
+  isMentionNotificationsEnabled(guildId: string, userId: string): boolean {
+    const row = this.db
+      .prepare("SELECT mention_notifications_enabled FROM user_settings WHERE user_id = ? AND guild_id = ?")
+      .get(userId, guildId) as { mention_notifications_enabled: number } | undefined;
+    // Default-on: no row means enabled.
+    return row?.mention_notifications_enabled !== 0;
+  }
+
+  getMentionChannelId(guildId: string): string | null {
+    const row = this.db
+      .prepare("SELECT mention_channel_id FROM guild_settings WHERE guild_id = ?")
+      .get(guildId) as { mention_channel_id: string | null } | undefined;
+    return row?.mention_channel_id ?? null;
+  }
+
+  setMentionChannelId(guildId: string, channelId: string | null): void {
+    this.ensureGuild(guildId);
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE guild_settings SET mention_channel_id = ?, updated_at = ? WHERE guild_id = ?")
+      .run(channelId, now, guildId);
+  }
+
+  setMentionNotificationsEnabled(guildId: string, userId: string, enabled: boolean): void {
+    this.ensureGuild(guildId);
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO user_settings (user_id, guild_id, mention_notifications_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, guild_id) DO UPDATE SET mention_notifications_enabled = excluded.mention_notifications_enabled, updated_at = excluded.updated_at`
+      )
+      .run(userId, guildId, enabled ? 1 : 0, now, now);
+  }
 }
 
 function mapSentAlertRow(row: SentAlertRow): SentAlert {

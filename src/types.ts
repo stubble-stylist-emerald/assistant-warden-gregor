@@ -41,6 +41,7 @@ export interface ScheduledEventSnapshot {
   scheduledStartAt: Date | null;
   status: number;
   interestedUserIds: string[];
+  mentionedUserIds: string[];
 }
 
 export interface DueAlert {

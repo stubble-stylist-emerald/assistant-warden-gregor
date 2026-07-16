@@ -21,7 +21,8 @@ const baseEvent: ScheduledEventSnapshot = {
   name: "Session",
   scheduledStartAt: new Date("2026-01-01T12:00:00.000Z"),
   status: GuildScheduledEventStatus.Scheduled,
-  interestedUserIds: ["user-1"]
+  interestedUserIds: ["user-1"],
+  mentionedUserIds: []
 };
 
 describe("scheduler due alerts", () => {
@@ -40,7 +41,8 @@ describe("scheduler due alerts", () => {
       now: new Date("2026-01-01T11:45:00.000Z"),
       events: [baseEvent],
       alertsByGuild: new Map([["guild-1", [baseAlert]]]),
-      wasSent: () => false
+      wasSent: () => false,
+      isMentionEnabled: () => true
     });
 
     expect(due).toMatchObject([{ alert: baseAlert, recipientIds: ["user-1"] }]);
@@ -61,7 +63,8 @@ describe("scheduler due alerts", () => {
           ]
         ]
       ]),
-      wasSent: () => false
+      wasSent: () => false,
+      isMentionEnabled: () => true
     });
 
     expect(due).toMatchObject([{ recipientIds: ["user-2"] }]);
@@ -72,7 +75,8 @@ describe("scheduler due alerts", () => {
       now: new Date("2026-01-01T11:45:00.000Z"),
       events: [{ ...baseEvent, interestedUserIds: [] }],
       alertsByGuild: new Map([["guild-1", [{ ...baseAlert, eventTarget: "all" }]]]),
-      wasSent: () => false
+      wasSent: () => false,
+      isMentionEnabled: () => true
     });
 
     expect(due).toMatchObject([{ recipientIds: ["user-1"] }]);
@@ -83,7 +87,8 @@ describe("scheduler due alerts", () => {
       now: new Date("2026-01-01T11:45:00.000Z"),
       events: [{ ...baseEvent, interestedUserIds: ["user-2"] }],
       alertsByGuild: new Map([["guild-1", [baseAlert]]]),
-      wasSent: () => false
+      wasSent: () => false,
+      isMentionEnabled: () => true
     });
 
     expect(due).toHaveLength(0);
@@ -95,7 +100,8 @@ describe("scheduler due alerts", () => {
         now: new Date("2026-01-01T11:45:00.000Z"),
         events: [baseEvent],
         alertsByGuild: new Map([["guild-1", [baseAlert]]]),
-        wasSent: () => true
+        wasSent: () => true,
+        isMentionEnabled: () => true
       })
     ).toHaveLength(0);
 
@@ -104,7 +110,8 @@ describe("scheduler due alerts", () => {
         now: new Date("2026-01-01T11:45:00.000Z"),
         events: [{ ...baseEvent, status: GuildScheduledEventStatus.Completed }],
         alertsByGuild: new Map([["guild-1", [baseAlert]]]),
-        wasSent: () => false
+        wasSent: () => false,
+        isMentionEnabled: () => true
       })
     ).toHaveLength(0);
 
@@ -113,7 +120,8 @@ describe("scheduler due alerts", () => {
         now: new Date("2026-01-01T11:45:00.000Z"),
         events: [baseEvent],
         alertsByGuild: new Map([["guild-1", [{ ...baseAlert, recipientIds: [] }]]]),
-        wasSent: () => false
+        wasSent: () => false,
+        isMentionEnabled: () => true
       })
     ).toHaveLength(0);
   });
@@ -134,6 +142,69 @@ describe("scheduler due alerts", () => {
       { name: "Start time", value: "<t:1767268800:F>" },
       { name: "Reminder", value: "30 minutes before start" }
     ]);
+  });
+});
+
+describe("mention recipients in due alerts", () => {
+  it("includes mentioned users with enabled notifications", () => {
+    const due = findDueAlerts({
+      now: new Date("2026-01-01T11:45:00.000Z"),
+      events: [{ ...baseEvent, mentionedUserIds: ["user-2"] }],
+      alertsByGuild: new Map([["guild-1", [{ ...baseAlert, recipientIds: ["user-1"] }]]]),
+      wasSent: () => false,
+      isMentionEnabled: () => true
+    });
+
+    expect(due).toMatchObject([{ recipientIds: ["user-1", "user-2"] }]);
+  });
+
+  it("excludes mentioned users with disabled notifications", () => {
+    const due = findDueAlerts({
+      now: new Date("2026-01-01T11:45:00.000Z"),
+      events: [{ ...baseEvent, mentionedUserIds: ["user-2"] }],
+      alertsByGuild: new Map([["guild-1", [{ ...baseAlert, recipientIds: ["user-1"] }]]]),
+      wasSent: () => false,
+      isMentionEnabled: (guildId, userId) => userId !== "user-2"
+    });
+
+    expect(due).toMatchObject([{ recipientIds: ["user-1"] }]);
+  });
+
+  it("does not duplicate mentioned users who are already recipients", () => {
+    const due = findDueAlerts({
+      now: new Date("2026-01-01T11:45:00.000Z"),
+      events: [{ ...baseEvent, mentionedUserIds: ["user-1"] }],
+      alertsByGuild: new Map([["guild-1", [{ ...baseAlert, recipientIds: ["user-1"] }]]]),
+      wasSent: () => false,
+      isMentionEnabled: () => true
+    });
+
+    expect(due).toMatchObject([{ recipientIds: ["user-1"] }]);
+  });
+
+  it("does not add mention recipients for all-target alerts", () => {
+    const due = findDueAlerts({
+      now: new Date("2026-01-01T11:45:00.000Z"),
+      events: [{ ...baseEvent, mentionedUserIds: ["user-3"] }],
+      alertsByGuild: new Map([["guild-1", [{ ...baseAlert, eventTarget: "all" }]]]),
+      wasSent: () => false,
+      isMentionEnabled: () => true
+    });
+
+    // All-target alerts already include all recipients; mentions don't add extras.
+    expect(due).toMatchObject([{ recipientIds: ["user-1"] }]);
+  });
+
+  it("creates an alert even when the only recipients are mentioned users", () => {
+    const due = findDueAlerts({
+      now: new Date("2026-01-01T11:45:00.000Z"),
+      events: [{ ...baseEvent, interestedUserIds: [], mentionedUserIds: ["user-2"] }],
+      alertsByGuild: new Map([["guild-1", [{ ...baseAlert, recipientIds: [] }]]]),
+      wasSent: () => false,
+      isMentionEnabled: () => true
+    });
+
+    expect(due).toMatchObject([{ recipientIds: ["user-2"] }]);
   });
 });
 
