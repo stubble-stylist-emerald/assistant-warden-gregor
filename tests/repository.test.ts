@@ -298,3 +298,102 @@ describe("auto-start settings", () => {
     expect(repository.listConfiguredGuildIds()).toEqual(["guild-1"]);
   });
 });
+
+describe("event channels", () => {
+  it("registers a channel and creates the guild row", () => {
+    const repository = createRepository();
+
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+
+    expect(repository.listEventChannelsForEvent("guild-1", "event-1")).toMatchObject([
+      { guildId: "guild-1", eventId: "event-1", channelId: "channel-1" }
+    ]);
+    expect(repository.listConfiguredGuildIds()).toEqual(["guild-1"]);
+  });
+
+  it("ignores duplicate registrations of the same channel", () => {
+    const repository = createRepository();
+
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+
+    expect(repository.listEventChannelsForEvent("guild-1", "event-1")).toHaveLength(1);
+  });
+
+  it("tracks multiple channels for one event", () => {
+    const repository = createRepository();
+
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1);
+
+    expect(repository.listEventChannelsForEvent("guild-1", "event-1")).toHaveLength(2);
+    expect(repository.listTrackedEventIds("guild-1")).toEqual(["event-1"]);
+  });
+
+  it("removes a single channel association", () => {
+    const repository = createRepository();
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1);
+
+    repository.removeEventChannel("guild-1", "event-1", "channel-1");
+
+    expect(repository.listEventChannelsForEvent("guild-1", "event-1").map((c) => c.channelId)).toEqual(["channel-2"]);
+  });
+
+  it("stores and updates tracking state", () => {
+    const repository = createRepository();
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+
+    expect(repository.getEventTracking("guild-1", "event-1")).toMatchObject({
+      lastKnownStartAt: "2026-01-01T12:00:00.000Z",
+      lastKnownStatus: 1
+    });
+
+    repository.updateEventTracking("guild-1", "event-1", "2026-01-01T13:00:00.000Z", 1);
+
+    expect(repository.getEventTracking("guild-1", "event-1")).toMatchObject({
+      lastKnownStartAt: "2026-01-01T13:00:00.000Z"
+    });
+  });
+
+  it("does not overwrite tracking state on a second registration", () => {
+    const repository = createRepository();
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", "2026-01-01T11:00:00.000Z", 1);
+
+    expect(repository.getEventTracking("guild-1", "event-1")).toMatchObject({
+      lastKnownStartAt: "2026-01-01T12:00:00.000Z"
+    });
+  });
+
+  it("removes tracking and all channel associations together", () => {
+    const repository = createRepository();
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1);
+
+    repository.removeEventTracking("guild-1", "event-1");
+
+    expect(repository.getEventTracking("guild-1", "event-1")).toBeNull();
+    expect(repository.listEventChannelsForEvent("guild-1", "event-1")).toEqual([]);
+  });
+
+  it("dedupes sent channel alerts", () => {
+    const repository = createRepository();
+
+    expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1")).toBe(false);
+    repository.recordSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1");
+    repository.recordSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1");
+
+    expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1")).toBe(true);
+    expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-2")).toBe(false);
+  });
+
+  it("clears channel alerts along with sent history", () => {
+    const repository = createRepository();
+    repository.recordSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1");
+
+    repository.clearSentHistory("guild-1");
+
+    expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1")).toBe(false);
+  });
+});

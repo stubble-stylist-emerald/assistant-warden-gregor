@@ -16,7 +16,7 @@ export function openDatabase(databasePath: string): Database.Database {
   return db;
 }
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // Migrate sequentially from currentVersion to targetVersion inside one transaction.
 // Unknown versions (non-zero, non-chain) are rejected with an error instead of
@@ -52,6 +52,10 @@ function migrateSchema(db: Database.Database, fromVersion: number, toVersion: nu
 
     if (fromVersion <= 4 && toVersion >= 5) {
       applyV5Migration(db);
+    }
+
+    if (fromVersion <= 5 && toVersion >= 6) {
+      applyV6Migration(db);
     }
 
     db.pragma(`user_version = ${toVersion}`);
@@ -123,4 +127,39 @@ function applyV5Migration(db: Database.Database): void {
       throw error;
     }
   }
+}
+
+function applyV6Migration(db: Database.Database): void {
+  // Channel reminder targets (event link → channel associations) and the
+  // per-event tracking snapshot used to detect reschedules/cancellations.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS event_channels (
+      guild_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (guild_id, event_id, channel_id),
+      FOREIGN KEY (guild_id) REFERENCES guild_settings(guild_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS event_tracking (
+      guild_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      last_known_start_at TEXT,
+      last_known_status INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (guild_id, event_id),
+      FOREIGN KEY (guild_id) REFERENCES guild_settings(guild_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS sent_channel_alerts (
+      guild_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      alert_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      sent_at TEXT NOT NULL,
+      PRIMARY KEY (guild_id, event_id, alert_id, channel_id)
+    );
+  `);
 }

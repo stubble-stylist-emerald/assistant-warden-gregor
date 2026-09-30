@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
-import type { Alert, AlertEventTarget, AlertOffsetUnit, FailedRecipient, SentAlert } from "./types";
+import type { Alert, AlertEventTarget, AlertOffsetUnit, EventChannel, EventTracking, FailedRecipient, SentAlert } from "./types";
 
 interface AlertRow {
   id: string;
@@ -218,6 +218,7 @@ export class AlertRepository {
 
   clearSentHistory(guildId: string): void {
     this.db.prepare("DELETE FROM sent_alerts WHERE guild_id = ?").run(guildId);
+    this.db.prepare("DELETE FROM sent_channel_alerts WHERE guild_id = ?").run(guildId);
   }
 
   private mapAlertRow(row: AlertRow): Alert {
@@ -328,6 +329,112 @@ export class AlertRepository {
       .prepare("SELECT guild_id FROM guild_settings WHERE auto_start_enabled = 1 ORDER BY guild_id")
       .all() as Array<{ guild_id: string }>;
     return rows.map((row) => row.guild_id);
+  }
+
+  registerEventChannel(
+    guildId: string,
+    eventId: string,
+    channelId: string,
+    lastKnownStartAt: string | null,
+    lastKnownStatus: number
+  ): void {
+    // ensureGuild first: event_channels has an FK to guild_settings, and the
+    // scheduler only polls guilds present in guild_settings.
+    this.ensureGuild(guildId);
+    const now = new Date().toISOString();
+    const register = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO event_channels (guild_id, event_id, channel_id, created_at)
+           VALUES (?, ?, ?, ?)`
+        )
+        .run(guildId, eventId, channelId, now);
+      this.db
+        .prepare(
+          `INSERT INTO event_tracking (guild_id, event_id, last_known_start_at, last_known_status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(guild_id, event_id) DO NOTHING`
+        )
+        .run(guildId, eventId, lastKnownStartAt, lastKnownStatus, now, now);
+    });
+    register();
+  }
+
+  removeEventChannel(guildId: string, eventId: string, channelId: string): void {
+    this.db
+      .prepare("DELETE FROM event_channels WHERE guild_id = ? AND event_id = ? AND channel_id = ?")
+      .run(guildId, eventId, channelId);
+  }
+
+  listEventChannelsForEvent(guildId: string, eventId: string): EventChannel[] {
+    const rows = this.db
+      .prepare("SELECT * FROM event_channels WHERE guild_id = ? AND event_id = ? ORDER BY created_at")
+      .all(guildId, eventId) as Array<{ guild_id: string; event_id: string; channel_id: string; created_at: string }>;
+    return rows.map((row) => ({
+      guildId: row.guild_id,
+      eventId: row.event_id,
+      channelId: row.channel_id,
+      createdAt: row.created_at
+    }));
+  }
+
+  listTrackedEventIds(guildId: string): string[] {
+    const rows = this.db
+      .prepare("SELECT DISTINCT event_id FROM event_channels WHERE guild_id = ?")
+      .all(guildId) as Array<{ event_id: string }>;
+    return rows.map((row) => row.event_id);
+  }
+
+  getEventTracking(guildId: string, eventId: string): EventTracking | null {
+    const row = this.db
+      .prepare("SELECT * FROM event_tracking WHERE guild_id = ? AND event_id = ?")
+      .get(guildId, eventId) as
+      | { guild_id: string; event_id: string; last_known_start_at: string | null; last_known_status: number; created_at: string; updated_at: string }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      guildId: row.guild_id,
+      eventId: row.event_id,
+      lastKnownStartAt: row.last_known_start_at,
+      lastKnownStatus: row.last_known_status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    };
+  }
+
+  updateEventTracking(guildId: string, eventId: string, lastKnownStartAt: string | null, lastKnownStatus: number): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE event_tracking SET last_known_start_at = ?, last_known_status = ?, updated_at = ?
+         WHERE guild_id = ? AND event_id = ?`
+      )
+      .run(lastKnownStartAt, lastKnownStatus, now, guildId, eventId);
+  }
+
+  removeEventTracking(guildId: string, eventId: string): void {
+    this.db.prepare("DELETE FROM event_tracking WHERE guild_id = ? AND event_id = ?").run(guildId, eventId);
+    this.db.prepare("DELETE FROM event_channels WHERE guild_id = ? AND event_id = ?").run(guildId, eventId);
+  }
+
+  hasSentChannelAlert(guildId: string, eventId: string, alertId: string, channelId: string): boolean {
+    const row = this.db
+      .prepare(
+        "SELECT 1 FROM sent_channel_alerts WHERE guild_id = ? AND event_id = ? AND alert_id = ? AND channel_id = ?"
+      )
+      .get(guildId, eventId, alertId, channelId);
+    return Boolean(row);
+  }
+
+  recordSentChannelAlert(guildId: string, eventId: string, alertId: string, channelId: string): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO sent_channel_alerts (guild_id, event_id, alert_id, channel_id, sent_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(guildId, eventId, alertId, channelId, new Date().toISOString());
   }
 }
 

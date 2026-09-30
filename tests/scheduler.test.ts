@@ -1,7 +1,14 @@
 import { GuildScheduledEventStatus } from "discord.js";
 import { describe, expect, it } from "vitest";
-import { buildAlertMessage, findDueAlerts, findEventsToAutoStart, isAlertDue } from "../src/scheduler";
-import type { Alert, ScheduledEventSnapshot } from "../src/types";
+import {
+  buildAlertMessage,
+  detectEventChanges,
+  findDueAlerts,
+  findDueChannelReminders,
+  findEventsToAutoStart,
+  isAlertDue
+} from "../src/scheduler";
+import type { Alert, EventTracking, ScheduledEventSnapshot } from "../src/types";
 
 const baseAlert: Alert = {
   id: "alert-1",
@@ -21,6 +28,7 @@ const baseEvent: ScheduledEventSnapshot = {
   name: "Session",
   scheduledStartAt: new Date("2026-01-01T12:00:00.000Z"),
   status: GuildScheduledEventStatus.Scheduled,
+  isRecurring: false,
   interestedUserIds: ["user-1"]
 };
 
@@ -200,5 +208,99 @@ describe("findEventsToAutoStart", () => {
     const result = findEventsToAutoStart(events, now);
 
     expect(result.map((e) => e.id)).toEqual(["event-1", "event-2"]);
+  });
+});
+
+describe("findDueChannelReminders", () => {
+  it("returns a due alert regardless of DM recipient interest", () => {
+    const reminders = findDueChannelReminders(
+      [{ ...baseEvent, interestedUserIds: [] }],
+      new Map([["guild-1", [{ ...baseAlert, recipientIds: ["user-9"] }]]]),
+      new Date("2026-01-01T11:45:00.000Z")
+    );
+
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0].event.id).toBe("event-1");
+    expect(reminders[0].alert.id).toBe("alert-1");
+  });
+
+  it("returns nothing before the alert offset", () => {
+    const reminders = findDueChannelReminders(
+      [baseEvent],
+      new Map([["guild-1", [baseAlert]]]),
+      new Date("2026-01-01T11:00:00.000Z")
+    );
+
+    expect(reminders).toHaveLength(0);
+  });
+
+  it("returns nothing for disabled alerts or non-scheduled events", () => {
+    const disabled = findDueChannelReminders(
+      [baseEvent],
+      new Map([["guild-1", [{ ...baseAlert, enabled: false }]]]),
+      new Date("2026-01-01T11:45:00.000Z")
+    );
+    const completed = findDueChannelReminders(
+      [{ ...baseEvent, status: GuildScheduledEventStatus.Completed }],
+      new Map([["guild-1", [baseAlert]]]),
+      new Date("2026-01-01T11:45:00.000Z")
+    );
+
+    expect(disabled).toHaveLength(0);
+    expect(completed).toHaveLength(0);
+  });
+});
+
+describe("detectEventChanges", () => {
+  const tracking = (event: ScheduledEventSnapshot, overrides: Partial<EventTracking> = {}): Map<string, EventTracking> =>
+    new Map([
+      [
+        `${event.guildId}:${event.id}`,
+        {
+          guildId: event.guildId,
+          eventId: event.id,
+          lastKnownStartAt: event.scheduledStartAt?.toISOString() ?? null,
+          lastKnownStatus: event.status,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          ...overrides
+        }
+      ]
+    ]);
+
+  it("detects a reschedule", () => {
+    const moved = { ...baseEvent, scheduledStartAt: new Date("2026-01-01T13:00:00.000Z") };
+    const changes = detectEventChanges([moved], tracking(baseEvent));
+
+    expect(changes).toMatchObject([{ type: "rescheduled", event: { id: "event-1" } }]);
+  });
+
+  it("reports no change when the start time is unchanged", () => {
+    expect(detectEventChanges([baseEvent], tracking(baseEvent))).toHaveLength(0);
+  });
+
+  it("detects a cancellation", () => {
+    const cancelled = { ...baseEvent, status: GuildScheduledEventStatus.Canceled };
+    const changes = detectEventChanges([cancelled], tracking(baseEvent));
+
+    expect(changes).toMatchObject([{ type: "cancelled" }]);
+  });
+
+  it("detects completion", () => {
+    const completed = { ...baseEvent, status: GuildScheduledEventStatus.Completed };
+    const changes = detectEventChanges([completed], tracking(baseEvent));
+
+    expect(changes).toMatchObject([{ type: "completed" }]);
+  });
+
+  it("skips reschedule detection for recurring events", () => {
+    const recurring = { ...baseEvent, isRecurring: true, scheduledStartAt: new Date("2026-01-01T13:00:00.000Z") };
+    const changes = detectEventChanges([recurring], tracking(baseEvent, { lastKnownStartAt: baseEvent.scheduledStartAt!.toISOString() }));
+
+    expect(changes).toHaveLength(0);
+  });
+
+  it("ignores events with no tracking record", () => {
+    expect(detectEventChanges([baseEvent], new Map())).toHaveLength(0);
   });
 });

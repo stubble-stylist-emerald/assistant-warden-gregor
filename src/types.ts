@@ -40,6 +40,7 @@ export interface ScheduledEventSnapshot {
   name: string;
   scheduledStartAt: Date | null;
   status: number;
+  isRecurring: boolean;
   interestedUserIds: string[];
 }
 
@@ -48,4 +49,34 @@ export interface DueAlert {
   event: ScheduledEventSnapshot;
   alert: Alert;
   recipientIds: string[];
+}
+
+export interface EventChannel {
+  guildId: string;
+  eventId: string;
+  channelId: string;
+  createdAt: string;
+}
+
+export interface EventTracking {
+  guildId: string;
+  eventId: string;
+  lastKnownStartAt: string | null;
+  lastKnownStatus: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EventChangeType = "rescheduled" | "cancelled" | "completed";
+
+export interface EventChange {
+  guildId: string;
+  event: ScheduledEventSnapshot;
+  type: EventChangeType;
+}
+
+export interface DueChannelReminder {
+  guildId: string;
+  event: ScheduledEventSnapshot;
+  alert: Alert;
 }

@@ -1,6 +1,7 @@
-import { Client, Events, GatewayIntentBits, MessageFlags } from "discord.js";
+import { Client, Events, GatewayIntentBits, GuildScheduledEventStatus, MessageFlags, type Message } from "discord.js";
 import { loadConfig } from "./config";
 import { openDatabase } from "./db";
+import { parseEventLink } from "./eventLinks";
 import { handleInteraction } from "./interactions";
 import { AlertRepository } from "./repository";
 import { runAlertPoll } from "./scheduler";
@@ -11,7 +12,12 @@ async function main(): Promise<void> {
   const db = openDatabase(config.databasePath);
   const repository = new AlertRepository(db);
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildScheduledEvents]
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildScheduledEvents,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent
+    ]
   });
   let pollRunning = false;
 
@@ -51,6 +57,13 @@ async function main(): Promise<void> {
     });
   });
 
+  // Register a channel as a reminder target when a human posts an event link.
+  client.on(Events.MessageCreate, (message) => {
+    void registerEventLinkMessage(message, repository).catch((error) => {
+      console.error("Event link handling failed:", error);
+    });
+  });
+
   process.once("SIGINT", () => {
     db.close();
     client.destroy();
@@ -64,3 +77,48 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+// Detect an event link in a message and record the channel as a reminder target.
+async function registerEventLinkMessage(
+  message: Message,
+  repository: AlertRepository
+): Promise<void> {
+  if (message.author.bot || !message.inGuild() || !message.guild) {
+    return;
+  }
+
+  const eventId = parseEventLink(message.content);
+  if (!eventId) {
+    return;
+  }
+
+  let event;
+  try {
+    event = await message.guild.scheduledEvents.fetch(eventId);
+  } catch {
+    return; // Not a valid event in this guild.
+  }
+
+  if (
+    !event ||
+    event.status !== GuildScheduledEventStatus.Scheduled ||
+    event.recurrenceRule != null
+  ) {
+    return;
+  }
+
+  repository.registerEventChannel(
+    message.guild.id,
+    event.id,
+    message.channelId,
+    event.scheduledStartAt?.toISOString() ?? null,
+    event.status
+  );
+
+  // Best-effort confirmation reaction.
+  try {
+    await message.react("✅");
+  } catch {
+    // Missing Add Reactions permission — not fatal.
+  }
+}

@@ -2,7 +2,6 @@ import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 import { EVENT_ALERTS_COMMAND, SUBSCRIBE_COMMAND } from "./commands";
 import { loadConfig } from "./config";
 import { openDatabase } from "./db";
-import { AlertRepository } from "./repository";
 
 // Verify the live Discord setup without printing tokens or other secrets.
 async function main(): Promise<void> {
@@ -12,8 +11,15 @@ async function main(): Promise<void> {
   // Verify the v5 migration applied the auto_start_enabled column.
   const columns = db.pragma("table_info(guild_settings)") as Array<{ name: string }>;
   const hasAutoStartColumn = columns.some((col) => col.name === "auto_start_enabled");
-  const autoStartGuildIds = new AlertRepository(db).listAutoStartGuildIds();
-  const noAutoStartGuildsByDefault = autoStartGuildIds.length === 0;
+
+  // Verify the v6 migration created the event-link reminder tables.
+  const tableNames = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
+    (row) => row.name
+  );
+  const hasEventChannelTables =
+    tableNames.includes("event_channels") &&
+    tableNames.includes("event_tracking") &&
+    tableNames.includes("sent_channel_alerts");
 
   db.close();
 
@@ -73,7 +79,7 @@ async function main(): Promise<void> {
       {
         databaseOpened: true,
         hasAutoStartColumn,
-        noAutoStartGuildsByDefault,
+        hasEventChannelTables,
         hasEventAlertsCommand,
         hasSubscribeCommand,
         ...result
@@ -87,8 +93,8 @@ async function main(): Promise<void> {
     throw new Error("Database migration v5 did not apply: auto_start_enabled column is missing.");
   }
 
-  if (!noAutoStartGuildsByDefault) {
-    throw new Error("listAutoStartGuildIds() should return an empty array by default.");
+  if (!hasEventChannelTables) {
+    throw new Error("Database migration v6 did not apply: event reminder tables are missing.");
   }
 
   if (!hasEventAlertsCommand) {
