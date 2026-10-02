@@ -350,7 +350,7 @@ async function sendChannelReminder(
         continue;
       }
 
-      await channel.send(buildChannelReminder(reminder.event, reminder.alert));
+      await channel.send(buildChannelReminder(reminder.event));
       repository.recordSentChannelAlert(reminder.guildId, reminder.event.id, reminder.alert.id, association.channelId);
     } catch (error) {
       console.warn(
@@ -399,45 +399,25 @@ async function handleEventChange(
   }
 }
 
-// Channel reminder posted to channels that registered an event link.
-export function buildChannelReminder(event: ScheduledEventSnapshot, alert: Alert): MessageCreateOptions {
-  const startTimestamp = Math.floor((event.scheduledStartAt?.getTime() ?? Date.now()) / 1000);
-  const alertTiming = formatOffset(alert.amount, alert.unit);
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(event.name)
-    .setDescription(`Starts <t:${startTimestamp}:R>`)
-    .addFields(
-      { name: "Start time", value: `<t:${startTimestamp}:F>`, inline: false },
-      { name: "Reminder", value: `${alertTiming} before start`, inline: true }
-    )
-    .setFooter({ text: "Gregor event reminder" })
-    .setTimestamp(new Date());
-
-  return { content: "Event reminder", embeds: [embed] };
+// Channel reminder posted to channels that registered an event link. Kept
+// minimal so Discord's native event card (unfurled from the link) carries the
+// name, time, and "Interested" controls.
+export function buildChannelReminder(event: ScheduledEventSnapshot): MessageCreateOptions {
+  return { content: `📅 Event reminder: ${buildEventLink(event.guildId, event.id)}` };
 }
 
 // Notice posted to channels when a tracked event is rescheduled or cancelled.
 export function buildEventUpdateMessage(event: ScheduledEventSnapshot, type: EventChange["type"]): MessageCreateOptions {
-  const startTimestamp = Math.floor((event.scheduledStartAt?.getTime() ?? Date.now()) / 1000);
-
   if (type === "cancelled") {
-    const embed = new EmbedBuilder()
-      .setColor(0xed4245)
-      .setTitle(event.name)
-      .setDescription("This event has been **cancelled**.")
-      .setFooter({ text: "Gregor event update" })
-      .setTimestamp(new Date());
-    return { content: "Event cancelled", embeds: [embed] };
+    return { content: `❌ Event cancelled: ${buildEventLink(event.guildId, event.id)}` };
   }
 
-  const embed = new EmbedBuilder()
-    .setColor(0xfee75c)
-    .setTitle(event.name)
-    .setDescription(`This event has been **rescheduled** to <t:${startTimestamp}:F> (<t:${startTimestamp}:R>).`)
-    .setFooter({ text: "Gregor event update" })
-    .setTimestamp(new Date());
-  return { content: "Event rescheduled", embeds: [embed] };
+  return { content: `🔄 Event rescheduled: ${buildEventLink(event.guildId, event.id)}` };
+}
+
+// Canonical Discord scheduled-event URL, which unfurls into the native event card.
+export function buildEventLink(guildId: string, eventId: string): string {
+  return `https://discord.com/events/${guildId}/${eventId}`;
 }
 
 function isSendableGuildText(channel: { isSendable?: () => boolean }): channel is SendableChannels {

@@ -2,6 +2,8 @@ import { GuildScheduledEventStatus } from "discord.js";
 import { describe, expect, it } from "vitest";
 import {
   buildAlertMessage,
+  buildChannelReminder,
+  buildEventUpdateMessage,
   detectEventChanges,
   findDueAlerts,
   findDueChannelReminders,
@@ -302,5 +304,28 @@ describe("detectEventChanges", () => {
 
   it("ignores events with no tracking record", () => {
     expect(detectEventChanges([baseEvent], new Map())).toHaveLength(0);
+  });
+});
+
+describe("channel notification messages", () => {
+  it("builds a minimal reminder that links the event", () => {
+    const message = buildChannelReminder(baseEvent);
+
+    expect(message.content).toBe("📅 Event reminder: https://discord.com/events/guild-1/event-1");
+    expect(message.embeds).toBeUndefined();
+  });
+
+  it("builds a cancellation notice linking the event", () => {
+    const message = buildEventUpdateMessage(baseEvent, "cancelled");
+
+    expect(message.content).toBe("❌ Event cancelled: https://discord.com/events/guild-1/event-1");
+    expect(message.embeds).toBeUndefined();
+  });
+
+  it("builds a reschedule notice linking the event", () => {
+    const message = buildEventUpdateMessage(baseEvent, "rescheduled");
+
+    expect(message.content).toBe("🔄 Event rescheduled: https://discord.com/events/guild-1/event-1");
+    expect(message.embeds).toBeUndefined();
   });
 });
