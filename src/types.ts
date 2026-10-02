@@ -41,6 +41,8 @@ export interface ScheduledEventSnapshot {
   scheduledStartAt: Date | null;
   status: number;
   isRecurring: boolean;
+  channelId: string | null;
+  location: string | null;
   interestedUserIds: string[];
 }
 
@@ -63,11 +65,13 @@ export interface EventTracking {
   eventId: string;
   lastKnownStartAt: string | null;
   lastKnownStatus: number;
+  lastKnownChannelId: string | null;
+  lastKnownLocation: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
-export type EventChangeType = "rescheduled" | "cancelled" | "completed";
+export type EventChangeType = "rescheduled" | "cancelled" | "completed" | "location_changed";
 
 export interface EventChange {
   guildId: string;

@@ -336,7 +336,9 @@ export class AlertRepository {
     eventId: string,
     channelId: string,
     lastKnownStartAt: string | null,
-    lastKnownStatus: number
+    lastKnownStatus: number,
+    lastKnownChannelId: string | null,
+    lastKnownLocation: string | null
   ): void {
     // ensureGuild first: event_channels has an FK to guild_settings, and the
     // scheduler only polls guilds present in guild_settings.
@@ -351,11 +353,12 @@ export class AlertRepository {
         .run(guildId, eventId, channelId, now);
       this.db
         .prepare(
-          `INSERT INTO event_tracking (guild_id, event_id, last_known_start_at, last_known_status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO event_tracking
+             (guild_id, event_id, last_known_start_at, last_known_status, last_known_channel_id, last_known_location, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(guild_id, event_id) DO NOTHING`
         )
-        .run(guildId, eventId, lastKnownStartAt, lastKnownStatus, now, now);
+        .run(guildId, eventId, lastKnownStartAt, lastKnownStatus, lastKnownChannelId, lastKnownLocation, now, now);
     });
     register();
   }
@@ -389,7 +392,16 @@ export class AlertRepository {
     const row = this.db
       .prepare("SELECT * FROM event_tracking WHERE guild_id = ? AND event_id = ?")
       .get(guildId, eventId) as
-      | { guild_id: string; event_id: string; last_known_start_at: string | null; last_known_status: number; created_at: string; updated_at: string }
+      | {
+          guild_id: string;
+          event_id: string;
+          last_known_start_at: string | null;
+          last_known_status: number;
+          last_known_channel_id: string | null;
+          last_known_location: string | null;
+          created_at: string;
+          updated_at: string;
+        }
       | undefined;
     if (!row) {
       return null;
@@ -399,19 +411,29 @@ export class AlertRepository {
       eventId: row.event_id,
       lastKnownStartAt: row.last_known_start_at,
       lastKnownStatus: row.last_known_status,
+      lastKnownChannelId: row.last_known_channel_id,
+      lastKnownLocation: row.last_known_location,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     };
   }
 
-  updateEventTracking(guildId: string, eventId: string, lastKnownStartAt: string | null, lastKnownStatus: number): void {
+  updateEventTracking(
+    guildId: string,
+    eventId: string,
+    lastKnownStartAt: string | null,
+    lastKnownStatus: number,
+    lastKnownChannelId: string | null,
+    lastKnownLocation: string | null
+  ): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `UPDATE event_tracking SET last_known_start_at = ?, last_known_status = ?, updated_at = ?
+        `UPDATE event_tracking
+         SET last_known_start_at = ?, last_known_status = ?, last_known_channel_id = ?, last_known_location = ?, updated_at = ?
          WHERE guild_id = ? AND event_id = ?`
       )
-      .run(lastKnownStartAt, lastKnownStatus, now, guildId, eventId);
+      .run(lastKnownStartAt, lastKnownStatus, lastKnownChannelId, lastKnownLocation, now, guildId, eventId);
   }
 
   removeEventTracking(guildId: string, eventId: string): void {

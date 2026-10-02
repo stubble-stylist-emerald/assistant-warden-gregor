@@ -112,7 +112,9 @@ async function registerEventLinkMessage(
     event.id,
     message.channelId,
     event.scheduledStartAt?.toISOString() ?? null,
-    event.status
+    event.status,
+    event.channelId ?? null,
+    event.entityMetadata?.location ?? null
   );
 
   // Best-effort confirmation reaction.

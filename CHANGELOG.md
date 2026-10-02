@@ -6,8 +6,9 @@
 
 - Channel reminder targets: posting a Discord event link in a channel registers that
   channel for reminders. At each configured alert offset the event reminder is also
-  posted to every registered channel, and reschedule/cancellation notices are sent
-  when a tracked event changes. Requires the `Message Content` privileged intent.
+  posted to every registered channel, and reschedule / location-change / cancellation
+  notices are sent when a tracked event changes. Requires the `Message Content`
+  privileged intent.
   - `parseEventLink` extracts event IDs from invite (`?event=`) and direct
     (`/events/<guild>/<event>`) links.
   - New tables: `event_channels`, `event_tracking`, `sent_channel_alerts` (schema v6).

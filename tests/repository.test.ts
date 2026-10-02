@@ -303,7 +303,7 @@ describe("event channels", () => {
   it("registers a channel and creates the guild row", () => {
     const repository = createRepository();
 
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1, null, null);
 
     expect(repository.listEventChannelsForEvent("guild-1", "event-1")).toMatchObject([
       { guildId: "guild-1", eventId: "event-1", channelId: "channel-1" }
@@ -314,8 +314,8 @@ describe("event channels", () => {
   it("ignores duplicate registrations of the same channel", () => {
     const repository = createRepository();
 
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1, null, null);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1, null, null);
 
     expect(repository.listEventChannelsForEvent("guild-1", "event-1")).toHaveLength(1);
   });
@@ -323,8 +323,8 @@ describe("event channels", () => {
   it("tracks multiple channels for one event", () => {
     const repository = createRepository();
 
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1);
-    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1, null, null);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1, null, null);
 
     expect(repository.listEventChannelsForEvent("guild-1", "event-1")).toHaveLength(2);
     expect(repository.listTrackedEventIds("guild-1")).toEqual(["event-1"]);
@@ -332,34 +332,38 @@ describe("event channels", () => {
 
   it("removes a single channel association", () => {
     const repository = createRepository();
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1);
-    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1, null, null);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1, null, null);
 
     repository.removeEventChannel("guild-1", "event-1", "channel-1");
 
     expect(repository.listEventChannelsForEvent("guild-1", "event-1").map((c) => c.channelId)).toEqual(["channel-2"]);
   });
 
-  it("stores and updates tracking state", () => {
+  it("stores and updates tracking state including location", () => {
     const repository = createRepository();
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1, "voice-1", null);
 
     expect(repository.getEventTracking("guild-1", "event-1")).toMatchObject({
       lastKnownStartAt: "2026-01-01T12:00:00.000Z",
-      lastKnownStatus: 1
+      lastKnownStatus: 1,
+      lastKnownChannelId: "voice-1",
+      lastKnownLocation: null
     });
 
-    repository.updateEventTracking("guild-1", "event-1", "2026-01-01T13:00:00.000Z", 1);
+    repository.updateEventTracking("guild-1", "event-1", "2026-01-01T13:00:00.000Z", 1, "voice-2", "Online");
 
     expect(repository.getEventTracking("guild-1", "event-1")).toMatchObject({
-      lastKnownStartAt: "2026-01-01T13:00:00.000Z"
+      lastKnownStartAt: "2026-01-01T13:00:00.000Z",
+      lastKnownChannelId: "voice-2",
+      lastKnownLocation: "Online"
     });
   });
 
   it("does not overwrite tracking state on a second registration", () => {
     const repository = createRepository();
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1);
-    repository.registerEventChannel("guild-1", "event-1", "channel-2", "2026-01-01T11:00:00.000Z", 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", "2026-01-01T12:00:00.000Z", 1, null, null);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", "2026-01-01T11:00:00.000Z", 1, null, null);
 
     expect(repository.getEventTracking("guild-1", "event-1")).toMatchObject({
       lastKnownStartAt: "2026-01-01T12:00:00.000Z"
@@ -368,8 +372,8 @@ describe("event channels", () => {
 
   it("removes tracking and all channel associations together", () => {
     const repository = createRepository();
-    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1);
-    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1);
+    repository.registerEventChannel("guild-1", "event-1", "channel-1", null, 1, null, null);
+    repository.registerEventChannel("guild-1", "event-1", "channel-2", null, 1, null, null);
 
     repository.removeEventTracking("guild-1", "event-1");
 

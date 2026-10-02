@@ -31,6 +31,8 @@ const baseEvent: ScheduledEventSnapshot = {
   scheduledStartAt: new Date("2026-01-01T12:00:00.000Z"),
   status: GuildScheduledEventStatus.Scheduled,
   isRecurring: false,
+  channelId: "channel-1",
+  location: null,
   interestedUserIds: ["user-1"]
 };
 
@@ -263,6 +265,8 @@ describe("detectEventChanges", () => {
           eventId: event.id,
           lastKnownStartAt: event.scheduledStartAt?.toISOString() ?? null,
           lastKnownStatus: event.status,
+          lastKnownChannelId: event.channelId,
+          lastKnownLocation: event.location,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           ...overrides
@@ -305,6 +309,21 @@ describe("detectEventChanges", () => {
   it("ignores events with no tracking record", () => {
     expect(detectEventChanges([baseEvent], new Map())).toHaveLength(0);
   });
+
+  it("detects a channel location change", () => {
+    const moved = { ...baseEvent, channelId: "channel-2" };
+    const changes = detectEventChanges([moved], tracking(baseEvent));
+
+    expect(changes).toMatchObject([{ type: "location_changed" }]);
+  });
+
+  it("detects an external location change", () => {
+    const external = { ...baseEvent, channelId: null, location: "Online" };
+    const moved = { ...external, location: "Discord Stage" };
+    const changes = detectEventChanges([moved], tracking(external));
+
+    expect(changes).toMatchObject([{ type: "location_changed" }]);
+  });
 });
 
 describe("channel notification messages", () => {
@@ -326,6 +345,13 @@ describe("channel notification messages", () => {
     const message = buildEventUpdateMessage(baseEvent, "rescheduled");
 
     expect(message.content).toBe("🔄 Event rescheduled: https://discord.com/events/guild-1/event-1");
+    expect(message.embeds).toBeUndefined();
+  });
+
+  it("builds a location-change notice linking the event", () => {
+    const message = buildEventUpdateMessage(baseEvent, "location_changed");
+
+    expect(message.content).toBe("📍 Event location changed: https://discord.com/events/guild-1/event-1");
     expect(message.embeds).toBeUndefined();
   });
 });

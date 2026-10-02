@@ -120,6 +120,15 @@ export function detectEventChanges(
       continue;
     }
 
+    // Location changes (channel or external text) are meaningful for one-off and
+    // recurring events alike, so check before the recurrence skip.
+    if (
+      event.channelId !== previous.lastKnownChannelId ||
+      event.location !== previous.lastKnownLocation
+    ) {
+      changes.push({ guildId: event.guildId, event, type: "location_changed" });
+    }
+
     if (event.isRecurring) {
       continue;
     }
@@ -205,6 +214,8 @@ async function fetchScheduledEvents(client: Client, repository: AlertRepository)
         scheduledStartAt: event.scheduledStartAt,
         status: event.status,
         isRecurring: event.recurrenceRule != null,
+        channelId: event.channelId ?? null,
+        location: event.entityMetadata?.location ?? null,
         interestedUserIds: await fetchInterestedUserIds(event)
       });
     }
@@ -395,7 +406,14 @@ async function handleEventChange(
   if (type === "cancelled") {
     repository.removeEventTracking(guildId, event.id);
   } else {
-    repository.updateEventTracking(guildId, event.id, event.scheduledStartAt?.toISOString() ?? null, event.status);
+    repository.updateEventTracking(
+      guildId,
+      event.id,
+      event.scheduledStartAt?.toISOString() ?? null,
+      event.status,
+      event.channelId,
+      event.location
+    );
   }
 }
 
@@ -406,10 +424,15 @@ export function buildChannelReminder(event: ScheduledEventSnapshot): MessageCrea
   return { content: `📅 Event reminder: ${buildEventLink(event.guildId, event.id)}` };
 }
 
-// Notice posted to channels when a tracked event is rescheduled or cancelled.
+// Notice posted to channels when a tracked event is rescheduled, relocated, or
+// cancelled. Kept minimal so Discord's native event card carries the details.
 export function buildEventUpdateMessage(event: ScheduledEventSnapshot, type: EventChange["type"]): MessageCreateOptions {
   if (type === "cancelled") {
     return { content: `❌ Event cancelled: ${buildEventLink(event.guildId, event.id)}` };
+  }
+
+  if (type === "location_changed") {
+    return { content: `📍 Event location changed: ${buildEventLink(event.guildId, event.id)}` };
   }
 
   return { content: `🔄 Event rescheduled: ${buildEventLink(event.guildId, event.id)}` };

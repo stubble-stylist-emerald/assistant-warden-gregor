@@ -117,16 +117,7 @@ function applyV4BaseSchema(db: Database.Database): void {
 }
 
 function applyV5Migration(db: Database.Database): void {
-  // Idempotent column addition — ignore if the column already exists from a
-  // partially-applied prior migration.
-  try {
-    db.exec("ALTER TABLE guild_settings ADD COLUMN auto_start_enabled INTEGER NOT NULL DEFAULT 0");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes("duplicate column name") && !message.includes("already exists")) {
-      throw error;
-    }
-  }
+  addColumnIfMissing(db, "guild_settings", "auto_start_enabled INTEGER NOT NULL DEFAULT 0");
 }
 
 function applyV6Migration(db: Database.Database): void {
@@ -147,6 +138,8 @@ function applyV6Migration(db: Database.Database): void {
       event_id TEXT NOT NULL,
       last_known_start_at TEXT,
       last_known_status INTEGER NOT NULL,
+      last_known_channel_id TEXT,
+      last_known_location TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (guild_id, event_id),
@@ -162,4 +155,15 @@ function applyV6Migration(db: Database.Database): void {
       PRIMARY KEY (guild_id, event_id, alert_id, channel_id)
     );
   `);
+}
+
+function addColumnIfMissing(db: Database.Database, table: string, columnDefinition: string): void {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDefinition}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes("duplicate column name") && !message.includes("already exists")) {
+      throw error;
+    }
+  }
 }
