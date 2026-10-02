@@ -80,7 +80,7 @@ main().catch((error) => {
 
 // Detect an event link in a message and record the channel as a reminder target.
 // All rejection paths are intentionally silent (no log): unparseable links, links
-// to another guild, and non-Scheduled or recurring events simply get no ✅ reaction.
+// to another guild, and non-Scheduled or recurring events simply get no 👀 reaction.
 async function registerEventLinkMessage(
   message: Message,
   repository: AlertRepository
@@ -114,7 +114,7 @@ async function registerEventLinkMessage(
 
   // Best-effort confirmation reaction so the poster knows it registered.
   try {
-    await message.react("✅");
+    await message.react("👀");
   } catch {
     // Missing Add Reactions permission — not fatal.
   }

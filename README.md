@@ -51,7 +51,7 @@ Grant the bot these permissions (invite link or role):
 - **Manage Events** — read event subscribers and auto-start events
 - **View Channel** — see the channels it posts in
 - **Send Messages** — DM reminders and post channel reminders
-- **Add Reactions** *(optional)* — the ✅ confirmation when a link is registered
+- **Add Reactions** *(optional)* — the 👀 confirmation when a link is registered
 
 Invite URL with these permissions:
 
@@ -118,7 +118,7 @@ recipients and posts to any registered channels. A sent-history record prevents
 the same reminder from going out twice.
 
 Channel targets are registered by posting an event link in a channel — Gregor
-reacts with ✅ to confirm. Only non-recurring, `Scheduled` events are tracked;
+reacts with 👀 to confirm. Only non-recurring, `Scheduled` events are tracked;
 when a tracked event is cancelled, completed, or deleted, its channel
 registrations are removed (re-post the link to track a new occurrence).
 
