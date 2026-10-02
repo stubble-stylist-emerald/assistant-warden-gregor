@@ -14,6 +14,7 @@ import type {
   DueChannelReminder,
   EventChange,
   EventTracking,
+  EventTrackingState,
   FailedRecipient,
   ScheduledEventSnapshot
 } from "./types";
@@ -68,6 +69,17 @@ export function isAlertDue(eventStart: Date, alert: Alert, now: Date): boolean {
   return alertAt.getTime() <= now.getTime() && now.getTime() < eventStart.getTime();
 }
 
+// Single source of truth for mapping a Discord event's mutable state into the
+// tracked snapshot. Used by both registration (message handler) and the poll,
+// so the two can never derive location/channel/start differently.
+export function eventTrackingStateFromDiscord(event: GuildScheduledEvent): EventTrackingState {
+  return {
+    lastKnownStartAt: event.scheduledStartAt?.toISOString() ?? null,
+    lastKnownChannelId: event.channelId ?? null,
+    lastKnownLocation: event.entityMetadata?.location ?? null
+  };
+}
+
 // Which (event, alert) pairs are due for channel reminders. Unlike findDueAlerts
 // this ignores DM recipient gating — the channel itself is the interested party
 // — but still requires an enabled alert and a due offset.
@@ -95,9 +107,16 @@ export function findDueChannelReminders(
   return reminders;
 }
 
-// Compare live events against stored tracking snapshots to detect reschedules
-// and cancellations. Recurring events are skipped because their start time and
-// status cycle every occurrence. Pure and unit-testable.
+// Shared key for the (guild, event) tracking map, so the pure detector and its
+// I/O caller can never disagree on the format.
+export function eventTrackingKey(guildId: string, eventId: string): string {
+  return `${guildId}:${eventId}`;
+}
+
+// Detect reschedules, location changes, cancellations, and completions for
+// tracked events. Recurring events cannot be registered as targets (see the
+// message handler), so they are skipped — defensively, since their start time
+// cycles each occurrence. Pure and unit-testable.
 export function detectEventChanges(
   events: ScheduledEventSnapshot[],
   tracking: Map<string, EventTracking>
@@ -105,7 +124,7 @@ export function detectEventChanges(
   const changes: EventChange[] = [];
 
   for (const event of events) {
-    const previous = tracking.get(`${event.guildId}:${event.id}`);
+    const previous = tracking.get(eventTrackingKey(event.guildId, event.id));
     if (!previous) {
       continue;
     }
@@ -120,17 +139,14 @@ export function detectEventChanges(
       continue;
     }
 
-    // Location changes (channel or external text) are meaningful for one-off and
-    // recurring events alike, so check before the recurrence skip.
-    if (
-      event.channelId !== previous.lastKnownChannelId ||
-      event.location !== previous.lastKnownLocation
-    ) {
-      changes.push({ guildId: event.guildId, event, type: "location_changed" });
-    }
-
     if (event.isRecurring) {
       continue;
+    }
+
+    // Location covers both channel (voice/stage) and external text locations;
+    // either changing is reported as a single "location_changed".
+    if (event.channelId !== previous.lastKnownChannelId || event.location !== previous.lastKnownLocation) {
+      changes.push({ guildId: event.guildId, event, type: "location_changed" });
     }
 
     const currentStart = event.scheduledStartAt?.toISOString() ?? null;
@@ -162,19 +178,43 @@ export async function runAlertPoll(client: Client, repository: AlertRepository, 
   // independent of DM recipient gating. Each post is deduped per channel.
   const dueChannelReminders = findDueChannelReminders(events, alertsByGuild, now);
   for (const reminder of dueChannelReminders) {
-    await sendChannelReminder(client, repository, reminder);
-  }
-
-  // Event update notices (reschedule / cancellation) for tracked events.
-  const tracking = new Map<string, EventTracking>();
-  for (const event of events) {
-    const state = repository.getEventTracking(event.guildId, event.id);
-    if (state) {
-      tracking.set(`${event.guildId}:${event.id}`, state);
+    try {
+      await sendChannelReminder(client, repository, reminder);
+    } catch (error) {
+      console.warn(
+        `[channel-reminder] Failed for event ${reminder.event.id} in guild ${reminder.guildId}:`,
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
+
+  // Event update notices (reschedule / location change / cancellation) plus
+  // cleanup of events that vanished from Discord while tracked.
+  const tracking = new Map<string, EventTracking>();
+  for (const configuredGuildId of repository.listConfiguredGuildIds()) {
+    for (const eventId of repository.listTrackedEventIds(configuredGuildId)) {
+      const state = repository.getEventTracking(configuredGuildId, eventId);
+      if (state) {
+        tracking.set(eventTrackingKey(configuredGuildId, eventId), state);
+      }
+    }
+  }
+  const liveEventKeys = new Set(events.map((event) => eventTrackingKey(event.guildId, event.id)));
+  for (const [key, state] of tracking) {
+    if (!liveEventKeys.has(key)) {
+      repository.removeEventTracking(state.guildId, state.eventId);
+    }
+  }
+
   for (const change of detectEventChanges(events, tracking)) {
-    await handleEventChange(client, repository, change);
+    try {
+      await handleEventChange(client, repository, change);
+    } catch (error) {
+      console.warn(
+        `[event-update] Failed to handle ${change.type} for event ${change.event.id}:`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
   }
 
   // Auto-start events whose start time has arrived. Each call is wrapped so one
@@ -207,6 +247,7 @@ async function fetchScheduledEvents(client: Client, repository: AlertRepository)
 
     const events = await guild.scheduledEvents.fetch();
     for (const [, event] of events) {
+      const state = eventTrackingStateFromDiscord(event);
       snapshots.push({
         id: event.id,
         guildId,
@@ -214,8 +255,8 @@ async function fetchScheduledEvents(client: Client, repository: AlertRepository)
         scheduledStartAt: event.scheduledStartAt,
         status: event.status,
         isRecurring: event.recurrenceRule != null,
-        channelId: event.channelId ?? null,
-        location: event.entityMetadata?.location ?? null,
+        channelId: state.lastKnownChannelId,
+        location: state.lastKnownLocation,
         interestedUserIds: await fetchInterestedUserIds(event)
       });
     }
@@ -406,14 +447,11 @@ async function handleEventChange(
   if (type === "cancelled") {
     repository.removeEventTracking(guildId, event.id);
   } else {
-    repository.updateEventTracking(
-      guildId,
-      event.id,
-      event.scheduledStartAt?.toISOString() ?? null,
-      event.status,
-      event.channelId,
-      event.location
-    );
+    repository.updateEventTracking(guildId, event.id, {
+      lastKnownStartAt: event.scheduledStartAt?.toISOString() ?? null,
+      lastKnownChannelId: event.channelId,
+      lastKnownLocation: event.location
+    });
   }
 }
 
@@ -426,7 +464,11 @@ export function buildChannelReminder(event: ScheduledEventSnapshot): MessageCrea
 
 // Notice posted to channels when a tracked event is rescheduled, relocated, or
 // cancelled. Kept minimal so Discord's native event card carries the details.
-export function buildEventUpdateMessage(event: ScheduledEventSnapshot, type: EventChange["type"]): MessageCreateOptions {
+// "completed" is excluded — a completed event never produces a message.
+export function buildEventUpdateMessage(
+  event: ScheduledEventSnapshot,
+  type: Exclude<EventChange["type"], "completed">
+): MessageCreateOptions {
   if (type === "cancelled") {
     return { content: `❌ Event cancelled: ${buildEventLink(event.guildId, event.id)}` };
   }
@@ -443,6 +485,8 @@ export function buildEventLink(guildId: string, eventId: string): string {
   return `https://discord.com/events/${guildId}/${eventId}`;
 }
 
+// Narrow a fetched channel to something postable (text-based and not a DM).
+// Structural parameter keeps this usable without importing the full Channel union.
 function isSendableGuildText(channel: { isSendable?: () => boolean }): channel is SendableChannels {
   return typeof channel.isSendable === "function" && channel.isSendable();
 }

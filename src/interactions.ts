@@ -761,11 +761,10 @@ function buildHistoryPanel(repository: AlertRepository, guildId: string, page: n
 }
 
 export function buildClearHistoryConfirmationPanel(repository: AlertRepository, guildId: string): InteractionUpdateOptions {
-  const history = repository.listSentHistory(guildId, 0, 1);
-  const detail =
-    history.length > 0
-      ? "This permanently deletes the sent-history records for this server. It does not delete alert configurations or recipients. Because Gregor uses sent history to avoid duplicate reminders, clearing it can cause notifications for already-sent event alerts to go out again."
-      : "There is no sent history to clear for this server.";
+  const hasHistory = repository.hasSentHistory(guildId);
+  const detail = hasHistory
+    ? "This permanently deletes the sent-history records for this server, including channel reminders. It does not delete alert configurations, recipients, or channel registrations. Because Gregor uses sent history to avoid duplicate reminders, clearing it can cause notifications for already-sent event alerts and reminders to go out again."
+    : "There is no sent history to clear for this server.";
   const container = new ContainerBuilder().addTextDisplayComponents(
     new TextDisplayBuilder().setContent(["# Clear sent history?", detail].join("\n\n"))
   );
@@ -775,7 +774,7 @@ export function buildClearHistoryConfirmationPanel(repository: AlertRepository, 
       .setCustomId(IDS.confirmClearHistory)
       .setLabel("Clear sent history")
       .setStyle(ButtonStyle.Danger)
-      .setDisabled(history.length === 0),
+      .setDisabled(!hasHistory),
     new ButtonBuilder().setCustomId(`${IDS.history}:0`).setLabel("Cancel").setStyle(ButtonStyle.Secondary)
   );
 

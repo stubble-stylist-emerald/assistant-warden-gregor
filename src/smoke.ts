@@ -12,7 +12,8 @@ async function main(): Promise<void> {
   const columns = db.pragma("table_info(guild_settings)") as Array<{ name: string }>;
   const hasAutoStartColumn = columns.some((col) => col.name === "auto_start_enabled");
 
-  // Verify the v6 migration created the event-link reminder tables.
+  // Verify the v6 migration created the event-link reminder tables and the
+  // location-tracking columns.
   const tableNames = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(
     (row) => row.name
   );
@@ -20,6 +21,9 @@ async function main(): Promise<void> {
     tableNames.includes("event_channels") &&
     tableNames.includes("event_tracking") &&
     tableNames.includes("sent_channel_alerts");
+  const trackingColumns = (db.pragma("table_info(event_tracking)") as Array<{ name: string }>).map((col) => col.name);
+  const hasLocationColumns =
+    trackingColumns.includes("last_known_channel_id") && trackingColumns.includes("last_known_location");
 
   db.close();
 
@@ -28,8 +32,15 @@ async function main(): Promise<void> {
   const hasEventAlertsCommand = commands.some((command) => command.name === EVENT_ALERTS_COMMAND);
   const hasSubscribeCommand = commands.some((command) => command.name === SUBSCRIBE_COMMAND);
 
+  // Use the same intents as the running bot, so smoke fails fast (close 4014)
+  // if the Message Content privileged intent is not enabled in the portal.
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildScheduledEvents]
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildScheduledEvents,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent
+    ]
   });
 
   const result = await new Promise<{
@@ -80,6 +91,7 @@ async function main(): Promise<void> {
         databaseOpened: true,
         hasAutoStartColumn,
         hasEventChannelTables,
+        hasLocationColumns,
         hasEventAlertsCommand,
         hasSubscribeCommand,
         ...result
@@ -95,6 +107,10 @@ async function main(): Promise<void> {
 
   if (!hasEventChannelTables) {
     throw new Error("Database migration v6 did not apply: event reminder tables are missing.");
+  }
+
+  if (!hasLocationColumns) {
+    throw new Error("Database migration v6 did not apply: event_tracking location columns are missing.");
   }
 
   if (!hasEventAlertsCommand) {

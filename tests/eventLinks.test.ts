@@ -38,6 +38,12 @@ describe("parseEventLink", () => {
     expect(parseEventLink(`<https://discord.gg/abc?event=${EVENT_ID}>`)).toBe(EVENT_ID);
   });
 
+  it("handles inline-code, bold, and spoiler wrappers", () => {
+    expect(parseEventLink(`\`https://discord.gg/abc?event=${EVENT_ID}\``)).toBe(EVENT_ID);
+    expect(parseEventLink(`**https://discord.gg/abc?event=${EVENT_ID}**`)).toBe(EVENT_ID);
+    expect(parseEventLink(`||https://discord.gg/abc?event=${EVENT_ID}||`)).toBe(EVENT_ID);
+  });
+
   it("tolerates trailing punctuation", () => {
     expect(parseEventLink(`https://discord.com/events/1413192357637263370/${EVENT_ID}.`)).toBe(EVENT_ID);
     expect(parseEventLink(`join here: https://discord.gg/abc?event=${EVENT_ID},`)).toBe(EVENT_ID);

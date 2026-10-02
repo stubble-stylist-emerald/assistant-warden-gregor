@@ -4,7 +4,7 @@ import { openDatabase } from "./db";
 import { parseEventLink } from "./eventLinks";
 import { handleInteraction } from "./interactions";
 import { AlertRepository } from "./repository";
-import { runAlertPoll } from "./scheduler";
+import { runAlertPoll, eventTrackingStateFromDiscord } from "./scheduler";
 
 // Wire Discord, storage, and the polling loop into the runtime process.
 async function main(): Promise<void> {
@@ -79,6 +79,8 @@ main().catch((error) => {
 });
 
 // Detect an event link in a message and record the channel as a reminder target.
+// All rejection paths are intentionally silent (no log): unparseable links, links
+// to another guild, and non-Scheduled or recurring events simply get no ✅ reaction.
 async function registerEventLinkMessage(
   message: Message,
   repository: AlertRepository
@@ -99,11 +101,7 @@ async function registerEventLinkMessage(
     return; // Not a valid event in this guild.
   }
 
-  if (
-    !event ||
-    event.status !== GuildScheduledEventStatus.Scheduled ||
-    event.recurrenceRule != null
-  ) {
+  if (event.status !== GuildScheduledEventStatus.Scheduled || event.recurrenceRule != null) {
     return;
   }
 
@@ -111,13 +109,10 @@ async function registerEventLinkMessage(
     message.guild.id,
     event.id,
     message.channelId,
-    event.scheduledStartAt?.toISOString() ?? null,
-    event.status,
-    event.channelId ?? null,
-    event.entityMetadata?.location ?? null
+    eventTrackingStateFromDiscord(event)
   );
 
-  // Best-effort confirmation reaction.
+  // Best-effort confirmation reaction so the poster knows it registered.
   try {
     await message.react("✅");
   } catch {

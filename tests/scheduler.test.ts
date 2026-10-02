@@ -264,7 +264,6 @@ describe("detectEventChanges", () => {
           guildId: event.guildId,
           eventId: event.id,
           lastKnownStartAt: event.scheduledStartAt?.toISOString() ?? null,
-          lastKnownStatus: event.status,
           lastKnownChannelId: event.channelId,
           lastKnownLocation: event.location,
           createdAt: "2026-01-01T00:00:00.000Z",

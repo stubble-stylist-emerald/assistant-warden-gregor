@@ -64,12 +64,16 @@ export interface EventTracking {
   guildId: string;
   eventId: string;
   lastKnownStartAt: string | null;
-  lastKnownStatus: number;
   lastKnownChannelId: string | null;
   lastKnownLocation: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+// The mutable portion of a tracking snapshot: everything compared for change
+// detection. Named so repository writes take one object instead of a row of
+// positional args.
+export type EventTrackingState = Omit<EventTracking, "guildId" | "eventId" | "createdAt" | "updatedAt">;
 
 export type EventChangeType = "rescheduled" | "cancelled" | "completed" | "location_changed";
 

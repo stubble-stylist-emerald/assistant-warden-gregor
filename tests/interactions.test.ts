@@ -127,7 +127,7 @@ describe("main alert panel", () => {
     const components = JSON.parse(JSON.stringify(panel.components));
 
     expect(components[0].components[0].content).toContain("permanently deletes the sent-history records");
-    expect(components[0].components[0].content).toContain("can cause notifications for already-sent event alerts to go out again");
+    expect(components[0].components[0].content).toContain("already-sent event alerts and reminders to go out again");
     expect(components[1].components[0]).toMatchObject({
       custom_id: "eventAlerts:confirmClearHistory",
       label: "Clear sent history",

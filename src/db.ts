@@ -137,7 +137,6 @@ function applyV6Migration(db: Database.Database): void {
       guild_id TEXT NOT NULL,
       event_id TEXT NOT NULL,
       last_known_start_at TEXT,
-      last_known_status INTEGER NOT NULL,
       last_known_channel_id TEXT,
       last_known_location TEXT,
       created_at TEXT NOT NULL,
@@ -152,7 +151,8 @@ function applyV6Migration(db: Database.Database): void {
       alert_id TEXT NOT NULL,
       channel_id TEXT NOT NULL,
       sent_at TEXT NOT NULL,
-      PRIMARY KEY (guild_id, event_id, alert_id, channel_id)
+      PRIMARY KEY (guild_id, event_id, alert_id, channel_id),
+      FOREIGN KEY (guild_id) REFERENCES guild_settings(guild_id) ON DELETE CASCADE
     );
   `);
 }

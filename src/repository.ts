@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
-import type { Alert, AlertEventTarget, AlertOffsetUnit, EventChannel, EventTracking, FailedRecipient, SentAlert } from "./types";
+import type { Alert, AlertEventTarget, AlertOffsetUnit, EventChannel, EventTracking, EventTrackingState, FailedRecipient, SentAlert } from "./types";
 
 interface AlertRow {
   id: string;
@@ -221,6 +221,20 @@ export class AlertRepository {
     this.db.prepare("DELETE FROM sent_channel_alerts WHERE guild_id = ?").run(guildId);
   }
 
+  // True if the guild has any sent-alert record (DM or channel). Used by the
+  // clear-history panel so its empty state matches what clearSentHistory deletes.
+  hasSentHistory(guildId: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT 1 FROM sent_alerts WHERE guild_id = ?
+         UNION ALL
+         SELECT 1 FROM sent_channel_alerts WHERE guild_id = ?
+         LIMIT 1`
+      )
+      .get(guildId, guildId);
+    return Boolean(row);
+  }
+
   private mapAlertRow(row: AlertRow): Alert {
     return {
       id: row.id,
@@ -331,14 +345,14 @@ export class AlertRepository {
     return rows.map((row) => row.guild_id);
   }
 
+  // Associate a channel with an event as a reminder target and record the
+  // event's initial tracked state. The tracking snapshot is first-write-wins
+  // (ON CONFLICT DO NOTHING) so re-posting a link never resets change detection.
   registerEventChannel(
     guildId: string,
     eventId: string,
     channelId: string,
-    lastKnownStartAt: string | null,
-    lastKnownStatus: number,
-    lastKnownChannelId: string | null,
-    lastKnownLocation: string | null
+    state: EventTrackingState
   ): void {
     // ensureGuild first: event_channels has an FK to guild_settings, and the
     // scheduler only polls guilds present in guild_settings.
@@ -354,11 +368,19 @@ export class AlertRepository {
       this.db
         .prepare(
           `INSERT INTO event_tracking
-             (guild_id, event_id, last_known_start_at, last_known_status, last_known_channel_id, last_known_location, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             (guild_id, event_id, last_known_start_at, last_known_channel_id, last_known_location, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(guild_id, event_id) DO NOTHING`
         )
-        .run(guildId, eventId, lastKnownStartAt, lastKnownStatus, lastKnownChannelId, lastKnownLocation, now, now);
+        .run(
+          guildId,
+          eventId,
+          state.lastKnownStartAt,
+          state.lastKnownChannelId,
+          state.lastKnownLocation,
+          now,
+          now
+        );
     });
     register();
   }
@@ -383,7 +405,7 @@ export class AlertRepository {
 
   listTrackedEventIds(guildId: string): string[] {
     const rows = this.db
-      .prepare("SELECT DISTINCT event_id FROM event_channels WHERE guild_id = ?")
+      .prepare("SELECT event_id FROM event_tracking WHERE guild_id = ?")
       .all(guildId) as Array<{ event_id: string }>;
     return rows.map((row) => row.event_id);
   }
@@ -396,7 +418,6 @@ export class AlertRepository {
           guild_id: string;
           event_id: string;
           last_known_start_at: string | null;
-          last_known_status: number;
           last_known_channel_id: string | null;
           last_known_location: string | null;
           created_at: string;
@@ -410,7 +431,6 @@ export class AlertRepository {
       guildId: row.guild_id,
       eventId: row.event_id,
       lastKnownStartAt: row.last_known_start_at,
-      lastKnownStatus: row.last_known_status,
       lastKnownChannelId: row.last_known_channel_id,
       lastKnownLocation: row.last_known_location,
       createdAt: row.created_at,
@@ -418,29 +438,26 @@ export class AlertRepository {
     };
   }
 
-  updateEventTracking(
-    guildId: string,
-    eventId: string,
-    lastKnownStartAt: string | null,
-    lastKnownStatus: number,
-    lastKnownChannelId: string | null,
-    lastKnownLocation: string | null
-  ): void {
+  updateEventTracking(guildId: string, eventId: string, state: EventTrackingState): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
         `UPDATE event_tracking
-         SET last_known_start_at = ?, last_known_status = ?, last_known_channel_id = ?, last_known_location = ?, updated_at = ?
+         SET last_known_start_at = ?, last_known_channel_id = ?, last_known_location = ?, updated_at = ?
          WHERE guild_id = ? AND event_id = ?`
       )
-      .run(lastKnownStartAt, lastKnownStatus, lastKnownChannelId, lastKnownLocation, now, guildId, eventId);
+      .run(state.lastKnownStartAt, state.lastKnownChannelId, state.lastKnownLocation, now, guildId, eventId);
   }
 
+  // Remove an event entirely: its tracking snapshot and every channel association.
+  // Used when an event completes, is cancelled, or vanishes from Discord.
   removeEventTracking(guildId: string, eventId: string): void {
     this.db.prepare("DELETE FROM event_tracking WHERE guild_id = ? AND event_id = ?").run(guildId, eventId);
     this.db.prepare("DELETE FROM event_channels WHERE guild_id = ? AND event_id = ?").run(guildId, eventId);
   }
 
+  // Channel-reminder dedup is per (event, alert, channel), unlike sent_alerts'
+  // per (guild, event, alert) — each channel gets each reminder exactly once.
   hasSentChannelAlert(guildId: string, eventId: string, alertId: string, channelId: string): boolean {
     const row = this.db
       .prepare(
@@ -451,6 +468,7 @@ export class AlertRepository {
   }
 
   recordSentChannelAlert(guildId: string, eventId: string, alertId: string, channelId: string): void {
+    this.ensureGuild(guildId);
     this.db
       .prepare(
         `INSERT OR IGNORE INTO sent_channel_alerts (guild_id, event_id, alert_id, channel_id, sent_at)

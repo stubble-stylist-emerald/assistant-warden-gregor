@@ -4,9 +4,10 @@
 // numeric query values (e.g. ?event=123 from some unrelated site).
 const SNOWFLAKE = /^\d{17,20}$/;
 
-// URLs may be wrapped in <> (suppressed embeds), markdown, or surrounded by
-// punctuation. Exclude whitespace and common delimiters so we isolate the URL.
-const URL_REGEX = /https?:\/\/[^\s<>()[\]"']+/gi;
+// URLs may be wrapped in <> (suppressed embeds) or markdown (inline code,
+// bold, spoilers) or surrounded by punctuation. Exclude whitespace and common
+// delimiters — including ``, `|`, and `*` — so we isolate the bare URL.
+const URL_REGEX = /https?:\/\/[^\s<>()[\]"'`|*]+/gi;
 
 // Direct event URL path: /events/<guild>/<event>
 const DIRECT_EVENT_PATH = /^\/events\/\d{17,20}\/(\d{17,20})$/;
