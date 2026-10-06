@@ -82,13 +82,16 @@ export function eventTrackingStateFromDiscord(event: GuildScheduledEvent): Event
 
 // Which (event, alert) pairs are due for channel reminders. Unlike findDueAlerts
 // this ignores DM recipient gating — the channel itself is the interested party
-// — but still requires an enabled alert and a due offset.
+// — but still requires an enabled alert and a due offset. Because channel
+// delivery ignores the all/interested filter, same-timing rules are collapsed to
+// one reminder per (event, effective offset).
 export function findDueChannelReminders(
   events: ScheduledEventSnapshot[],
   alertsByGuild: Map<string, Alert[]>,
   now: Date
 ): DueChannelReminder[] {
   const reminders: DueChannelReminder[] = [];
+  const seenTimings = new Set<string>();
 
   for (const event of events) {
     if (!event.scheduledStartAt || event.status !== GuildScheduledEventStatus.Scheduled) {
@@ -99,6 +102,12 @@ export function findDueChannelReminders(
       if (!alert.enabled || !isAlertDue(event.scheduledStartAt, alert, now)) {
         continue;
       }
+
+      const timingKey = `${event.guildId}:${event.id}:${offsetToMilliseconds(alert.amount, alert.unit)}`;
+      if (seenTimings.has(timingKey)) {
+        continue;
+      }
+      seenTimings.add(timingKey);
 
       reminders.push({ guildId: event.guildId, event, alert });
     }
@@ -159,6 +168,19 @@ export function detectEventChanges(
 }
 
 export async function runAlertPoll(client: Client, repository: AlertRepository, now = new Date()): Promise<void> {
+  // Capture tracked state BEFORE fetching events. A channel registered during
+  // this poll's async work must never be mistaken for a deleted event and pruned
+  // (the poll overlap guard does not serialize concurrent message handlers).
+  const tracking = new Map<string, EventTracking>();
+  for (const configuredGuildId of repository.listConfiguredGuildIds()) {
+    for (const eventId of repository.listTrackedEventIds(configuredGuildId)) {
+      const state = repository.getEventTracking(configuredGuildId, eventId);
+      if (state) {
+        tracking.set(eventTrackingKey(configuredGuildId, eventId), state);
+      }
+    }
+  }
+
   const events = await fetchScheduledEvents(client, repository);
   const guildIds = Array.from(new Set(events.map((event) => event.guildId)));
   const alertsByGuild = new Map(guildIds.map((guildId) => [guildId, repository.listAlerts(guildId)]));
@@ -188,17 +210,8 @@ export async function runAlertPoll(client: Client, repository: AlertRepository, 
     }
   }
 
-  // Event update notices (reschedule / location change / cancellation) plus
-  // cleanup of events that vanished from Discord while tracked.
-  const tracking = new Map<string, EventTracking>();
-  for (const configuredGuildId of repository.listConfiguredGuildIds()) {
-    for (const eventId of repository.listTrackedEventIds(configuredGuildId)) {
-      const state = repository.getEventTracking(configuredGuildId, eventId);
-      if (state) {
-        tracking.set(eventTrackingKey(configuredGuildId, eventId), state);
-      }
-    }
-  }
+  // Prune tracking for events that vanished from Discord: only records captured
+  // before this poll started are candidates (see the capture above).
   const liveEventKeys = new Set(events.map((event) => eventTrackingKey(event.guildId, event.id)));
   for (const [key, state] of tracking) {
     if (!liveEventKeys.has(key)) {
@@ -206,6 +219,7 @@ export async function runAlertPoll(client: Client, repository: AlertRepository, 
     }
   }
 
+  // Event update notices (reschedule / location change / cancellation).
   for (const change of detectEventChanges(events, tracking)) {
     try {
       await handleEventChange(client, repository, change);
@@ -388,9 +402,12 @@ async function sendChannelReminder(
   reminder: DueChannelReminder
 ): Promise<void> {
   const associations = repository.listEventChannelsForEvent(reminder.guildId, reminder.event.id);
+  // Dedupe by effective timing (not alert id) so same-timing rules never
+  // double-post and the key is stable regardless of which rule wins.
+  const dedupeKey = channelReminderDedupeKey(reminder.alert);
 
   for (const association of associations) {
-    if (repository.hasSentChannelAlert(reminder.guildId, reminder.event.id, reminder.alert.id, association.channelId)) {
+    if (repository.hasSentChannelAlert(reminder.guildId, reminder.event.id, dedupeKey, association.channelId)) {
       continue;
     }
 
@@ -403,7 +420,15 @@ async function sendChannelReminder(
       }
 
       await channel.send(buildChannelReminder(reminder.event));
-      repository.recordSentChannelAlert(reminder.guildId, reminder.event.id, reminder.alert.id, association.channelId);
+      repository.recordSentChannelAlert({
+        guildId: reminder.guildId,
+        eventId: reminder.event.id,
+        dedupeKey,
+        channelId: association.channelId,
+        eventName: reminder.event.name,
+        offsetAmount: reminder.alert.amount,
+        offsetUnit: reminder.alert.unit
+      });
     } catch (error) {
       console.warn(
         `[channel-reminder] Failed to post for event ${reminder.event.id} in channel ${association.channelId}:`,
@@ -427,7 +452,14 @@ async function handleEventChange(
   }
 
   const associations = repository.listEventChannelsForEvent(guildId, event.id);
+  const dedupeKey = eventChangeDedupeKey(event, type);
+  let allDelivered = true;
+
   for (const association of associations) {
+    if (repository.hasSentChannelAlert(guildId, event.id, dedupeKey, association.channelId)) {
+      continue;
+    }
+
     try {
       const channel = await client.channels.fetch(association.channelId);
       if (!channel || !isSendableGuildText(channel)) {
@@ -436,12 +468,27 @@ async function handleEventChange(
       }
 
       await channel.send(buildEventUpdateMessage(event, type));
+      repository.recordSentChannelAlert({
+        guildId,
+        eventId: event.id,
+        dedupeKey,
+        channelId: association.channelId,
+        eventName: event.name
+      });
     } catch (error) {
+      allDelivered = false;
       console.warn(
         `[event-update] Failed to post ${type} notice for event ${event.id} in channel ${association.channelId}:`,
         error instanceof Error ? error.message : String(error)
       );
     }
+  }
+
+  // If any delivery failed, keep the previous tracking snapshot so the change is
+  // re-detected and retried next poll. Already-delivered channels are skipped by
+  // the per-channel dedupe, so retries never duplicate.
+  if (!allDelivered) {
+    return;
   }
 
   if (type === "cancelled") {
@@ -483,6 +530,19 @@ export function buildEventUpdateMessage(
 // Canonical Discord scheduled-event URL, which unfurls into the native event card.
 export function buildEventLink(guildId: string, eventId: string): string {
   return `https://discord.com/events/${guildId}/${eventId}`;
+}
+
+// Dedupe key for a channel reminder: keyed by effective offset so same-timing
+// rules collapse to one delivery regardless of which rule fires.
+export function channelReminderDedupeKey(alert: Alert): string {
+  return `reminder:${offsetToMilliseconds(alert.amount, alert.unit)}`;
+}
+
+// Dedupe key for an event update notice: keyed by the event's new state, so a
+// pending (undelivered) notice stays stable across retry polls while a further
+// change produces a new key.
+export function eventChangeDedupeKey(event: ScheduledEventSnapshot, type: EventChange["type"]): string {
+  return `change:${type}:${event.scheduledStartAt?.toISOString() ?? ""}:${event.channelId ?? ""}:${event.location ?? ""}`;
 }
 
 // Narrow a fetched channel to something postable (text-based and not a DM).

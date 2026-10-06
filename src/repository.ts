@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
-import type { Alert, AlertEventTarget, AlertOffsetUnit, EventChannel, EventTracking, EventTrackingState, FailedRecipient, SentAlert } from "./types";
+import type { Alert, AlertEventTarget, AlertOffsetUnit, EventChannel, EventTracking, EventTrackingState, FailedRecipient, SentAlert, SentChannelAlert } from "./types";
 
 interface AlertRow {
   id: string;
@@ -457,24 +457,69 @@ export class AlertRepository {
   }
 
   // Channel-reminder dedup is per (event, alert, channel), unlike sent_alerts'
-  // per (guild, event, alert) — each channel gets each reminder exactly once.
-  hasSentChannelAlert(guildId: string, eventId: string, alertId: string, channelId: string): boolean {
+  // per (guild, event, alert) — each channel gets each delivery exactly once.
+  // `dedupeKey` is an alert id (reminders) or a `change:<fingerprint>` (notices).
+  hasSentChannelAlert(guildId: string, eventId: string, dedupeKey: string, channelId: string): boolean {
     const row = this.db
       .prepare(
-        "SELECT 1 FROM sent_channel_alerts WHERE guild_id = ? AND event_id = ? AND alert_id = ? AND channel_id = ?"
+        "SELECT 1 FROM sent_channel_alerts WHERE guild_id = ? AND event_id = ? AND dedupe_key = ? AND channel_id = ?"
       )
-      .get(guildId, eventId, alertId, channelId);
+      .get(guildId, eventId, dedupeKey, channelId);
     return Boolean(row);
   }
 
-  recordSentChannelAlert(guildId: string, eventId: string, alertId: string, channelId: string): void {
-    this.ensureGuild(guildId);
+  recordSentChannelAlert(input: {
+    guildId: string;
+    eventId: string;
+    dedupeKey: string;
+    channelId: string;
+    eventName: string;
+    offsetAmount?: number | null;
+    offsetUnit?: AlertOffsetUnit | null;
+  }): void {
+    this.ensureGuild(input.guildId);
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO sent_channel_alerts (guild_id, event_id, alert_id, channel_id, sent_at)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO sent_channel_alerts
+           (guild_id, event_id, dedupe_key, channel_id, event_name, offset_amount, offset_unit, sent_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(guildId, eventId, alertId, channelId, new Date().toISOString());
+      .run(
+        input.guildId,
+        input.eventId,
+        input.dedupeKey,
+        input.channelId,
+        input.eventName,
+        input.offsetAmount ?? null,
+        input.offsetUnit ?? null,
+        new Date().toISOString()
+      );
+  }
+
+  listSentChannelHistory(guildId: string, page: number, pageSize: number): SentChannelAlert[] {
+    const offset = Math.max(0, page) * pageSize;
+    const rows = this.db
+      .prepare("SELECT * FROM sent_channel_alerts WHERE guild_id = ? ORDER BY sent_at DESC LIMIT ? OFFSET ?")
+      .all(guildId, pageSize, offset) as Array<{
+      guild_id: string;
+      event_id: string;
+      dedupe_key: string;
+      channel_id: string;
+      event_name: string;
+      offset_amount: number | null;
+      offset_unit: AlertOffsetUnit | null;
+      sent_at: string;
+    }>;
+    return rows.map((row) => ({
+      guildId: row.guild_id,
+      eventId: row.event_id,
+      dedupeKey: row.dedupe_key,
+      channelId: row.channel_id,
+      eventName: row.event_name,
+      offsetAmount: row.offset_amount,
+      offsetUnit: row.offset_unit,
+      sentAt: row.sent_at
+    }));
   }
 }
 

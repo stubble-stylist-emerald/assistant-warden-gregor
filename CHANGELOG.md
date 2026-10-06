@@ -13,10 +13,14 @@
   - New tables: `event_channels`, `event_tracking`, `sent_channel_alerts` (schema v6).
   - Pure `findDueChannelReminders` and `detectEventChanges` scheduler functions.
   - Channel reminders ignore the alert's `all`/`interested` filter — the channel
-    itself is the interested party.
+    itself is the interested party — and same-timing rules collapse to a single
+    delivery per event.
   - Only non-recurring, `Scheduled` events are tracked. When a tracked event is
     cancelled, completed, or deleted, its channel registrations are removed; re-post
-    the link to track a new occurrence.
+    the link to track a new occurrence. A reschedule/location/cancellation notice
+    that fails to deliver is retried on the next poll (already-delivered channels
+    are not re-notified).
+  - Sent history shows channel deliveries alongside DM reminders.
 - Auto-start scheduled events at their start time, opt-in per guild via `/gregor-admin` toggle.
   - Pure `findEventsToAutoStart` scheduler function with full unit test coverage.
   - `startEvent` handles Discord API errors gracefully (deleted events, missing permissions).

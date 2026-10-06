@@ -34,6 +34,19 @@ export interface SentAlert {
   errorSummary: string | null;
 }
 
+// A channel delivery (either a reminder or an update notice). `dedupeKey` is the
+// alert id for reminders, or a `change:<fingerprint>` key for update notices.
+export interface SentChannelAlert {
+  guildId: string;
+  eventId: string;
+  dedupeKey: string;
+  channelId: string;
+  eventName: string;
+  offsetAmount: number | null;
+  offsetUnit: AlertOffsetUnit | null;
+  sentAt: string;
+}
+
 export interface ScheduledEventSnapshot {
   id: string;
   guildId: string;

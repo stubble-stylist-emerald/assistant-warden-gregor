@@ -148,10 +148,13 @@ function applyV6Migration(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS sent_channel_alerts (
       guild_id TEXT NOT NULL,
       event_id TEXT NOT NULL,
-      alert_id TEXT NOT NULL,
+      dedupe_key TEXT NOT NULL,
       channel_id TEXT NOT NULL,
+      event_name TEXT NOT NULL,
+      offset_amount INTEGER,
+      offset_unit TEXT,
       sent_at TEXT NOT NULL,
-      PRIMARY KEY (guild_id, event_id, alert_id, channel_id),
+      PRIMARY KEY (guild_id, event_id, dedupe_key, channel_id),
       FOREIGN KEY (guild_id) REFERENCES guild_settings(guild_id) ON DELETE CASCADE
     );
   `);

@@ -30,7 +30,7 @@ import {
 import { EVENT_ALERTS_COMMAND, SUBSCRIBE_COMMAND } from "./commands";
 import { formatOffset, OffsetParseError, parseAlertOffset } from "./offset";
 import type { AlertRepository } from "./repository";
-import type { Alert, AlertEventTarget, AlertOffsetUnit, SentAlert } from "./types";
+import type { Alert, AlertEventTarget, AlertOffsetUnit, SentAlert, SentChannelAlert } from "./types";
 
 const IDS = {
   addAlert: "eventAlerts:addAlert",
@@ -736,12 +736,18 @@ export function buildAlertPanel(alert: Alert): InteractionUpdateOptions {
 function buildHistoryPanel(repository: AlertRepository, guildId: string, page: number): InteractionUpdateOptions {
   const normalizedPage = Math.max(0, page);
   const history = repository.listSentHistory(guildId, normalizedPage, HISTORY_PAGE_SIZE);
-  const container = new ContainerBuilder().addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      ["# Sent history", history.length > 0 ? history.map(formatHistoryEntry).join("\n\n") : "No sent alerts yet."].join("\n")
-    )
-  );
+  const channelHistory = repository.listSentChannelHistory(guildId, normalizedPage, HISTORY_PAGE_SIZE);
+  const content = [
+    "# Sent history",
+    "**DM reminders**",
+    history.length > 0 ? history.map(formatHistoryEntry).join("\n\n") : "None yet.",
+    "",
+    "**Channel reminders**",
+    channelHistory.length > 0 ? channelHistory.map(formatChannelHistoryEntry).join("\n\n") : "None yet."
+  ].join("\n");
+  const container = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
 
+  const hasMore = history.length >= HISTORY_PAGE_SIZE || channelHistory.length >= HISTORY_PAGE_SIZE;
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`${IDS.history}:${Math.max(0, normalizedPage - 1)}`)
@@ -752,7 +758,7 @@ function buildHistoryPanel(repository: AlertRepository, guildId: string, page: n
       .setCustomId(`${IDS.history}:${normalizedPage + 1}`)
       .setLabel("Next")
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(history.length < HISTORY_PAGE_SIZE),
+      .setDisabled(!hasMore),
     new ButtonBuilder().setCustomId(IDS.clearHistory).setLabel("Clear history").setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId(IDS.back).setLabel("Back").setStyle(ButtonStyle.Secondary)
   );
@@ -941,4 +947,30 @@ function formatHistoryEntry(entry: SentAlert): string {
     `Sent: <t:${sent}:R>`,
     `Recipients: ${entry.successfulRecipientIds.length}/${entry.attemptedRecipientIds.length} succeeded${failed}`
   ].join("\n");
+}
+
+function formatChannelHistoryEntry(entry: SentChannelAlert): string {
+  const sent = Math.floor(new Date(entry.sentAt).getTime() / 1000);
+  let summary: string;
+  if (entry.dedupeKey.startsWith("change:")) {
+    summary = changeTypeLabel(entry.dedupeKey.split(":")[1] ?? "");
+  } else if (entry.offsetAmount != null && entry.offsetUnit) {
+    summary = `${formatOffset(entry.offsetAmount, entry.offsetUnit)} before`;
+  } else {
+    summary = "Reminder";
+  }
+  return [`**${entry.eventName}** in <#${entry.channelId}>`, `${summary} · <t:${sent}:R>`].join("\n");
+}
+
+function changeTypeLabel(changeType: string): string {
+  switch (changeType) {
+    case "rescheduled":
+      return "Rescheduled";
+    case "location_changed":
+      return "Location changed";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Update";
+  }
 }

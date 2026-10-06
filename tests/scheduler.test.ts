@@ -253,6 +253,19 @@ describe("findDueChannelReminders", () => {
     expect(disabled).toHaveLength(0);
     expect(completed).toHaveLength(0);
   });
+
+  it("collapses same-timing rules to one reminder per event", () => {
+    const allAlert = { ...baseAlert, id: "alert-all", eventTarget: "all" as const };
+    const interestedAlert = { ...baseAlert, id: "alert-interested", eventTarget: "interested" as const };
+
+    const reminders = findDueChannelReminders(
+      [baseEvent],
+      new Map([["guild-1", [allAlert, interestedAlert]]]),
+      new Date("2026-01-01T11:45:00.000Z")
+    );
+
+    expect(reminders).toHaveLength(1);
+  });
 });
 
 describe("detectEventChanges", () => {

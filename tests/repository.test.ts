@@ -388,18 +388,48 @@ describe("event channels", () => {
 
   it("dedupes sent channel alerts", () => {
     const repository = createRepository();
+    const record = {
+      guildId: "guild-1",
+      eventId: "event-1",
+      dedupeKey: "alert-1",
+      channelId: "channel-1",
+      eventName: "Session"
+    };
 
     expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1")).toBe(false);
-    repository.recordSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1");
-    repository.recordSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1");
+    repository.recordSentChannelAlert(record);
+    repository.recordSentChannelAlert(record);
 
     expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1")).toBe(true);
     expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-2")).toBe(false);
   });
 
+  it("lists channel deliveries in the sent-channel history", () => {
+    const repository = createRepository();
+    repository.recordSentChannelAlert({
+      guildId: "guild-1",
+      eventId: "event-1",
+      dedupeKey: "reminder:1800000",
+      channelId: "channel-1",
+      eventName: "Session",
+      offsetAmount: 30,
+      offsetUnit: "minutes"
+    });
+
+    expect(repository.listSentChannelHistory("guild-1", 0, 10)).toMatchObject([
+      { eventName: "Session", channelId: "channel-1", offsetAmount: 30, offsetUnit: "minutes" }
+    ]);
+  });
+
   it("clears channel alerts along with sent history", () => {
     const repository = createRepository();
-    repository.recordSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1");
+    repository.recordSentChannelAlert({
+      guildId: "guild-1",
+      eventId: "event-1",
+      dedupeKey: "alert-1",
+      channelId: "channel-1",
+      eventName: "Session"
+    });
 
     repository.clearSentHistory("guild-1");
 
