@@ -83,6 +83,8 @@ describe("runAlertPoll integration", () => {
   it("keeps a channel registered during the poll (registration-loss race)", async () => {
     const repository = createRepository();
     repository.registerEventChannel("guild-1", "event-A", "channel-1", state("2026-01-01T12:00:00.000Z"));
+    // Keep the reminder offset out of the way; this test is about pruning only.
+    repository.setDefaultReminderOffset("guild-1", { amount: 5, unit: "minutes" });
 
     const { client } = makeClient({
       events: [{ id: "event-A", startAt: new Date("2026-01-01T12:00:00.000Z") }],
@@ -131,6 +133,30 @@ describe("runAlertPoll integration", () => {
     expect(repository.getEventTracking("guild-1", "event-A")?.lastKnownStartAt).toBe("2026-01-01T13:00:00.000Z");
 
     // Poll 3: no further change → no duplicate delivery.
+    await runAlertPoll(client, repository, now);
+    expect(deliveries).toEqual(["channel-1"]);
+  });
+
+  it("delivers one reminder per event per channel, even after the default changes", async () => {
+    const repository = createRepository();
+    repository.registerEventChannel("guild-1", "event-A", "channel-1", state("2026-01-01T13:00:00.000Z"));
+    repository.setDefaultReminderOffset("guild-1", { amount: 1, unit: "hours" });
+
+    const deliveries: string[] = [];
+    const { client } = makeClient({
+      events: [{ id: "event-A", startAt: new Date("2026-01-01T13:00:00.000Z") }],
+      onSend: (channelId) => {
+        deliveries.push(channelId);
+      }
+    });
+
+    const now = new Date("2026-01-01T12:30:00.000Z");
+
+    await runAlertPoll(client, repository, now);
+    expect(deliveries).toEqual(["channel-1"]);
+
+    // The offset is now also due, but the event was already reminded once.
+    repository.setDefaultReminderOffset("guild-1", { amount: 30, unit: "minutes" });
     await runAlertPoll(client, repository, now);
     expect(deliveries).toEqual(["channel-1"]);
   });

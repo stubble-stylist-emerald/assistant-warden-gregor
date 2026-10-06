@@ -162,8 +162,9 @@ async function handleSubscribeCommand(
   repository.ensureGuild(guildId);
   await closePreviousPanel(guildId, interaction.user.id, "subscribe");
 
-  // New members go straight to the prefilled form (default offset) so they can
-  // just hit OK. Members who already have subscriptions get the management panel.
+  // Members with no subscriptions go straight to the prefilled form (default
+  // offset) so they can just hit OK. Members who already have subscriptions get
+  // the management panel.
   if (repository.listSubscribedAlerts(guildId, interaction.user.id).length === 0) {
     await interaction.showModal(buildSubscriptionOffsetModal(repository, guildId));
     return;
@@ -279,8 +280,8 @@ async function handleEventAlertsButton(interaction: ButtonInteraction, repositor
   }
 
   if (interaction.customId === IDS.setDefaultReminder) {
-    const current = repository.getDefaultReminderOffset(guildId);
-    await interaction.showModal(buildDefaultReminderModal(formatOffset(current.amount, current.unit)));
+    const { offset } = repository.getDefaultReminderSettings(guildId);
+    await interaction.showModal(buildDefaultReminderModal(formatOffset(offset.amount, offset.unit)));
     return;
   }
 
@@ -650,23 +651,19 @@ export function buildMainPanel(
   headerContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
   // Default reminder offset — drives channel reminders and prefills /subscribe.
-  const defaultReminder = repository.getDefaultReminderOffset(guildId);
-  const isCustomDefault = repository.hasCustomDefaultReminder(guildId);
+  const { offset: defaultReminder, isCustom } = repository.getDefaultReminderSettings(guildId);
   headerContainer.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       `**Default reminder**: ${formatOffset(defaultReminder.amount, defaultReminder.unit)} before start${
-        isCustomDefault ? "" : " (default)"
+        isCustom ? "" : " (default)"
       }\nRegistered channels get one reminder at this time, and it prefills the /subscribe form.`
     )
   );
 
   const reminderButtons = [
-    new ButtonBuilder()
-      .setCustomId(IDS.setDefaultReminder)
-      .setLabel(isCustomDefault ? "Change default reminder" : "Change reminder")
-      .setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId(IDS.setDefaultReminder).setLabel("Change reminder").setStyle(ButtonStyle.Primary)
   ];
-  if (isCustomDefault) {
+  if (isCustom) {
     reminderButtons.push(
       new ButtonBuilder().setCustomId(IDS.resetDefaultReminder).setLabel("Reset to default").setStyle(ButtonStyle.Secondary)
     );
@@ -856,17 +853,16 @@ function buildOffsetModal(customId: string, title: string, value?: string, event
   return buildAlertModal({ customId, title, value, eventTarget, recipientIds: [], includeRecipients: false, requireRecipients: false });
 }
 
-// Offset-only modal for the guild default reminder (no event-filter/recipient inputs).
-function buildDefaultReminderModal(currentValue?: string): ModalBuilder {
+// Offset-only modal for the guild default reminder (no event-filter/recipient
+// inputs). Always opened with the effective offset, so members just hit OK.
+function buildDefaultReminderModal(currentValue: string): ModalBuilder {
   const offsetInput = new TextInputBuilder()
     .setCustomId("offset")
     .setLabel("Default reminder offset")
     .setPlaceholder("30 minutes, 2 hours, or 1 day")
     .setRequired(true)
-    .setStyle(TextInputStyle.Short);
-  if (currentValue) {
-    offsetInput.setValue(currentValue);
-  }
+    .setStyle(TextInputStyle.Short)
+    .setValue(currentValue);
   return new ModalBuilder()
     .setCustomId(IDS.modalDefaultReminder)
     .setTitle("Default reminder")
@@ -932,11 +928,11 @@ function buildAlertModal(input: {
 }
 
 function buildSubscriptionOffsetModal(repository: AlertRepository, guildId: string): ModalBuilder {
-  const defaultReminder = repository.getDefaultReminderOffset(guildId);
+  const { offset } = repository.getDefaultReminderSettings(guildId);
   return buildOffsetModal(
     SUBSCRIPTION_IDS.modalAdd,
     "Create alert",
-    formatOffset(defaultReminder.amount, defaultReminder.unit),
+    formatOffset(offset.amount, offset.unit),
     "interested"
   );
 }

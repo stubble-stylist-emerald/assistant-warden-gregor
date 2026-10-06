@@ -103,8 +103,9 @@ export interface DueChannelReminder {
   unit: AlertOffsetUnit;
 }
 
-// A guild's default reminder offset (admin-configured). Drives channel reminders
-// now, and the DM fallback later.
+// A guild's effective default reminder offset. Drives channel reminders and
+// prefills the /subscribe form; falls back to the built-in default (24 hours)
+// when the guild never configured one.
 export interface DefaultReminder {
   amount: number;
   unit: AlertOffsetUnit;

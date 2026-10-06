@@ -30,6 +30,20 @@ interface SentAlertRow {
   error_summary: string | null;
 }
 
+// A guild's effective default reminder offset: the stored pair, or the built-in
+// 24 hours when either half is missing. Both columns are written together, so
+// requiring both keeps the admin panel and the scheduler reading the same value.
+function effectiveDefaultReminder(
+  amount: number | null | undefined,
+  unit: AlertOffsetUnit | null | undefined
+): DefaultReminder {
+  return amount && unit ? { amount, unit } : DEFAULT_REMINDER_OFFSET;
+}
+
+function isBuiltInDefaultReminder(reminder: DefaultReminder): boolean {
+  return reminder.amount === DEFAULT_REMINDER_OFFSET.amount && reminder.unit === DEFAULT_REMINDER_OFFSET.unit;
+}
+
 export class AlertRepository {
   constructor(private readonly db: Database.Database) {}
 
@@ -346,24 +360,16 @@ export class AlertRepository {
     return rows.map((row) => row.guild_id);
   }
 
-  // Effective guild default reminder offset. Always returns a value: guilds that
-  // never configured one fall back to DEFAULT_REMINDER_OFFSET (24 hours).
-  getDefaultReminderOffset(guildId: string): DefaultReminder {
+  // Effective guild default reminder offset plus whether it differs from the
+  // built-in default. A single row read and a single normalization shared by the
+  // admin panel, the /subscribe prefill, and the scheduler, so they cannot
+  // disagree about the same guild.
+  getDefaultReminderSettings(guildId: string): { offset: DefaultReminder; isCustom: boolean } {
     const row = this.db
       .prepare("SELECT default_reminder_amount, default_reminder_unit FROM guild_settings WHERE guild_id = ?")
       .get(guildId) as { default_reminder_amount: number | null; default_reminder_unit: AlertOffsetUnit | null } | undefined;
-    if (row?.default_reminder_amount && row.default_reminder_unit) {
-      return { amount: row.default_reminder_amount, unit: row.default_reminder_unit };
-    }
-    return { ...DEFAULT_REMINDER_OFFSET };
-  }
-
-  // Whether the guild has overridden the default (vs. using the built-in 24h).
-  hasCustomDefaultReminder(guildId: string): boolean {
-    const row = this.db
-      .prepare("SELECT default_reminder_amount, default_reminder_unit FROM guild_settings WHERE guild_id = ?")
-      .get(guildId) as { default_reminder_amount: number | null; default_reminder_unit: AlertOffsetUnit | null } | undefined;
-    return Boolean(row?.default_reminder_amount && row.default_reminder_unit);
+    const offset = effectiveDefaultReminder(row?.default_reminder_amount, row?.default_reminder_unit);
+    return { offset, isCustom: !isBuiltInDefaultReminder(offset) };
   }
 
   // Passing null resets the guild to the built-in default (24 hours).
@@ -377,14 +383,15 @@ export class AlertRepository {
       .run(reminder?.amount ?? null, reminder?.unit ?? null, now, guildId);
   }
 
+  // Effective default for every configured guild. Drives channel reminders, which
+  // therefore fire for guilds that never configured a default.
   listGuildDefaultReminders(): Array<{ guildId: string } & DefaultReminder> {
     const rows = this.db
       .prepare("SELECT guild_id, default_reminder_amount, default_reminder_unit FROM guild_settings")
       .all() as Array<{ guild_id: string; default_reminder_amount: number | null; default_reminder_unit: AlertOffsetUnit | null }>;
     return rows.map((row) => ({
       guildId: row.guild_id,
-      amount: row.default_reminder_amount ?? DEFAULT_REMINDER_OFFSET.amount,
-      unit: row.default_reminder_unit ?? DEFAULT_REMINDER_OFFSET.unit
+      ...effectiveDefaultReminder(row.default_reminder_amount, row.default_reminder_unit)
     }));
   }
 

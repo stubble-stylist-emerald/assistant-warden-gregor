@@ -83,9 +83,10 @@ export function eventTrackingStateFromDiscord(event: GuildScheduledEvent): Event
 }
 
 // Which events are due for a channel reminder. Channel delivery is driven by the
-// guild's admin-configured default reminder offset (decoupled from the DM alert
-// list, so member subscriptions never cause channel traffic). One reminder per
-// event when the offset comes due.
+// guild's effective default reminder offset — the built-in default (24 hours)
+// unless an admin configured one — so it is decoupled from the DM alert list and
+// member subscriptions never cause channel traffic. At most one reminder per
+// event per registered channel.
 export function findDueChannelReminders(
   events: ScheduledEventSnapshot[],
   defaultReminders: Map<string, DefaultReminder>,
@@ -401,8 +402,10 @@ async function sendChannelReminder(
   reminder: DueChannelReminder
 ): Promise<void> {
   const associations = repository.listEventChannelsForEvent(reminder.guildId, reminder.event.id);
-  // Dedupe keyed by the default offset so each channel gets one reminder.
-  const dedupeKey = channelReminderDedupeKey(reminder.amount, reminder.unit);
+  // One reminder per (event, channel): the offset is a mutable guild setting, so
+  // keying the dedupe on it would fire a second reminder when an admin changes or
+  // resets the default for an event that already got one.
+  const dedupeKey = CHANNEL_REMINDER_DEDUPE_KEY;
 
   for (const association of associations) {
     if (repository.hasSentChannelAlert(reminder.guildId, reminder.event.id, dedupeKey, association.channelId)) {
@@ -530,11 +533,9 @@ export function buildEventLink(guildId: string, eventId: string): string {
   return `https://discord.com/events/${guildId}/${eventId}`;
 }
 
-// Dedupe key for a channel reminder: keyed by effective offset so same-timing
-// rules collapse to one delivery regardless of which rule fires.
-export function channelReminderDedupeKey(amount: number, unit: AlertOffsetUnit): string {
-  return `reminder:${offsetToMilliseconds(amount, unit)}`;
-}
+// How many times a channel reminder must fire per (guild, event, channel). The
+// offset is a mutable setting, so it is deliberately not part of this key.
+const CHANNEL_REMINDER_DEDUPE_KEY = "reminder";
 
 // Dedupe key for an event update notice: keyed by the event's new state, so a
 // pending (undelivered) notice stays stable across retry polls while a further

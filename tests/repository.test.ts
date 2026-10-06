@@ -4,9 +4,13 @@ import { initializeSchema } from "../src/db";
 import { AlertRepository } from "../src/repository";
 
 function createRepository(): AlertRepository {
+  return createRepositoryWithDb().repository;
+}
+
+function createRepositoryWithDb(): { repository: AlertRepository; db: Database.Database } {
   const db = new Database(":memory:");
   initializeSchema(db);
-  return new AlertRepository(db);
+  return { repository: new AlertRepository(db), db };
 }
 
 describe("AlertRepository", () => {
@@ -442,8 +446,10 @@ describe("default reminder offset", () => {
     const repository = createRepository();
     repository.ensureGuild("guild-1");
 
-    expect(repository.getDefaultReminderOffset("guild-1")).toEqual({ amount: 24, unit: "hours" });
-    expect(repository.hasCustomDefaultReminder("guild-1")).toBe(false);
+    expect(repository.getDefaultReminderSettings("guild-1")).toEqual({
+      offset: { amount: 24, unit: "hours" },
+      isCustom: false
+    });
     expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 24, unit: "hours" }]);
   });
 
@@ -452,13 +458,38 @@ describe("default reminder offset", () => {
     repository.ensureGuild("guild-1");
 
     repository.setDefaultReminderOffset("guild-1", { amount: 2, unit: "hours" });
-    expect(repository.getDefaultReminderOffset("guild-1")).toEqual({ amount: 2, unit: "hours" });
-    expect(repository.hasCustomDefaultReminder("guild-1")).toBe(true);
+    expect(repository.getDefaultReminderSettings("guild-1")).toEqual({
+      offset: { amount: 2, unit: "hours" },
+      isCustom: true
+    });
     expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 2, unit: "hours" }]);
 
     repository.setDefaultReminderOffset("guild-1", null);
-    expect(repository.getDefaultReminderOffset("guild-1")).toEqual({ amount: 24, unit: "hours" });
-    expect(repository.hasCustomDefaultReminder("guild-1")).toBe(false);
+    expect(repository.getDefaultReminderSettings("guild-1")).toEqual({
+      offset: { amount: 24, unit: "hours" },
+      isCustom: false
+    });
+    expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 24, unit: "hours" }]);
+  });
+
+  it("treats an explicitly stored built-in value as the default, not a customization", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.setDefaultReminderOffset("guild-1", { amount: 24, unit: "hours" });
+
+    expect(repository.getDefaultReminderSettings("guild-1")).toEqual({
+      offset: { amount: 24, unit: "hours" },
+      isCustom: false
+    });
+  });
+
+  it("resolves a partially populated row to the built-in default everywhere", () => {
+    const { repository, db } = createRepositoryWithDb();
+    repository.ensureGuild("guild-1");
+    // Only the amount is set; the pair must not be half-honored.
+    db.prepare("UPDATE guild_settings SET default_reminder_amount = 2 WHERE guild_id = ?").run("guild-1");
+
+    expect(repository.getDefaultReminderSettings("guild-1").offset).toEqual({ amount: 24, unit: "hours" });
     expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 24, unit: "hours" }]);
   });
 

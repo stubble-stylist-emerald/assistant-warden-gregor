@@ -17,6 +17,8 @@
     subscriptions never add channel timings. Guilds default to **24 hours before**
     unless an admin sets a different offset (configurable in `/gregor-admin`;
     "Reset to default" restores 24 hours).
+  - Each event is reminded **once per registered channel**; changing or resetting
+    the default offset does not re-remind an event that already got one.
   - Only non-recurring, `Scheduled` events are tracked. When a tracked event is
     cancelled, completed, or deleted, its channel registrations are removed; re-post
     the link to track a new occurrence. A reschedule/location/cancellation notice

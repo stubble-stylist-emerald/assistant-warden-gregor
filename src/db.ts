@@ -121,8 +121,9 @@ function applyV5Migration(db: Database.Database): void {
 }
 
 function applyV6Migration(db: Database.Database): void {
-  // A single guild-level default reminder offset drives channel reminders
-  // (decoupled from the DM alert list). NULL = not set.
+  // A single guild-level default reminder offset drives channel reminders and
+  // prefills /subscribe (decoupled from the DM alert list). NULL = use the
+  // built-in default (24 hours; see src/offset.ts).
   addColumnIfMissing(db, "guild_settings", "default_reminder_amount INTEGER");
   addColumnIfMissing(db, "guild_settings", "default_reminder_unit TEXT");
 

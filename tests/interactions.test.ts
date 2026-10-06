@@ -234,6 +234,18 @@ describe("main alert panel", () => {
     expect(JSON.stringify(components)).not.toContain("(default)");
     expect(JSON.stringify(components)).toContain("eventAlerts:resetDefaultReminder");
   });
+
+  it("shows an explicitly stored built-in value as the default", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.setDefaultReminderOffset("guild-1", { amount: 24, unit: "hours" });
+
+    const panel = buildMainPanel(repository, "guild-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    expect(JSON.stringify(components)).toContain("24 hours before start (default)");
+    expect(JSON.stringify(components)).not.toContain("eventAlerts:resetDefaultReminder");
+  });
 });
 
 describe("subscription panel", () => {
