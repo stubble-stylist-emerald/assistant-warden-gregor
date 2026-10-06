@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
-import type { Alert, AlertEventTarget, AlertOffsetUnit, EventChannel, EventTracking, EventTrackingState, FailedRecipient, SentAlert, SentChannelAlert } from "./types";
+import type { Alert, AlertEventTarget, AlertOffsetUnit, DefaultReminder, EventChannel, EventTracking, EventTrackingState, FailedRecipient, SentAlert, SentChannelAlert } from "./types";
 
 interface AlertRow {
   id: string;
@@ -343,6 +343,39 @@ export class AlertRepository {
       .prepare("SELECT guild_id FROM guild_settings WHERE auto_start_enabled = 1 ORDER BY guild_id")
       .all() as Array<{ guild_id: string }>;
     return rows.map((row) => row.guild_id);
+  }
+
+  getDefaultReminderOffset(guildId: string): DefaultReminder | null {
+    const row = this.db
+      .prepare("SELECT default_reminder_amount, default_reminder_unit FROM guild_settings WHERE guild_id = ?")
+      .get(guildId) as { default_reminder_amount: number | null; default_reminder_unit: AlertOffsetUnit | null } | undefined;
+    if (!row?.default_reminder_amount || !row.default_reminder_unit) {
+      return null;
+    }
+    return { amount: row.default_reminder_amount, unit: row.default_reminder_unit };
+  }
+
+  setDefaultReminderOffset(guildId: string, reminder: DefaultReminder | null): void {
+    this.ensureGuild(guildId);
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        "UPDATE guild_settings SET default_reminder_amount = ?, default_reminder_unit = ?, updated_at = ? WHERE guild_id = ?"
+      )
+      .run(reminder?.amount ?? null, reminder?.unit ?? null, now, guildId);
+  }
+
+  listGuildDefaultReminders(): Array<{ guildId: string } & DefaultReminder> {
+    const rows = this.db
+      .prepare(
+        "SELECT guild_id, default_reminder_amount, default_reminder_unit FROM guild_settings WHERE default_reminder_amount IS NOT NULL AND default_reminder_unit IS NOT NULL"
+      )
+      .all() as Array<{ guild_id: string; default_reminder_amount: number; default_reminder_unit: AlertOffsetUnit }>;
+    return rows.map((row) => ({
+      guildId: row.guild_id,
+      amount: row.default_reminder_amount,
+      unit: row.default_reminder_unit
+    }));
   }
 
   // Associate a channel with an event as a reminder target and record the

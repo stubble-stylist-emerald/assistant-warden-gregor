@@ -436,3 +436,35 @@ describe("event channels", () => {
     expect(repository.hasSentChannelAlert("guild-1", "event-1", "alert-1", "channel-1")).toBe(false);
   });
 });
+
+describe("default reminder offset", () => {
+  it("is unset by default", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    expect(repository.getDefaultReminderOffset("guild-1")).toBeNull();
+    expect(repository.listGuildDefaultReminders()).toEqual([]);
+  });
+
+  it("sets, reads, and clears the default reminder", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    repository.setDefaultReminderOffset("guild-1", { amount: 2, unit: "hours" });
+    expect(repository.getDefaultReminderOffset("guild-1")).toEqual({ amount: 2, unit: "hours" });
+    expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 2, unit: "hours" }]);
+
+    repository.setDefaultReminderOffset("guild-1", null);
+    expect(repository.getDefaultReminderOffset("guild-1")).toBeNull();
+    expect(repository.listGuildDefaultReminders()).toEqual([]);
+  });
+
+  it("lists defaults only for guilds that set one", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.ensureGuild("guild-2");
+    repository.setDefaultReminderOffset("guild-2", { amount: 30, unit: "minutes" });
+
+    expect(repository.listGuildDefaultReminders().map((r) => r.guildId)).toEqual(["guild-2"]);
+  });
+});

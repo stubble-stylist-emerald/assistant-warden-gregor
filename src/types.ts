@@ -99,5 +99,13 @@ export interface EventChange {
 export interface DueChannelReminder {
   guildId: string;
   event: ScheduledEventSnapshot;
-  alert: Alert;
+  amount: number;
+  unit: AlertOffsetUnit;
+}
+
+// A guild's default reminder offset (admin-configured). Drives channel reminders
+// now, and the DM fallback later.
+export interface DefaultReminder {
+  amount: number;
+  unit: AlertOffsetUnit;
 }

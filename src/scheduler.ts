@@ -10,6 +10,8 @@ import { formatOffset, offsetToMilliseconds } from "./offset";
 import type { AlertRepository } from "./repository";
 import type {
   Alert,
+  AlertOffsetUnit,
+  DefaultReminder,
   DueAlert,
   DueChannelReminder,
   EventChange,
@@ -80,36 +82,30 @@ export function eventTrackingStateFromDiscord(event: GuildScheduledEvent): Event
   };
 }
 
-// Which (event, alert) pairs are due for channel reminders. Unlike findDueAlerts
-// this ignores DM recipient gating — the channel itself is the interested party
-// — but still requires an enabled alert and a due offset. Because channel
-// delivery ignores the all/interested filter, same-timing rules are collapsed to
-// one reminder per (event, effective offset).
+// Which events are due for a channel reminder. Channel delivery is driven by the
+// guild's admin-configured default reminder offset (decoupled from the DM alert
+// list, so member subscriptions never cause channel traffic). One reminder per
+// event when the offset comes due.
 export function findDueChannelReminders(
   events: ScheduledEventSnapshot[],
-  alertsByGuild: Map<string, Alert[]>,
+  defaultReminders: Map<string, DefaultReminder>,
   now: Date
 ): DueChannelReminder[] {
   const reminders: DueChannelReminder[] = [];
-  const seenTimings = new Set<string>();
 
   for (const event of events) {
     if (!event.scheduledStartAt || event.status !== GuildScheduledEventStatus.Scheduled) {
       continue;
     }
 
-    for (const alert of alertsByGuild.get(event.guildId) ?? []) {
-      if (!alert.enabled || !isAlertDue(event.scheduledStartAt, alert, now)) {
-        continue;
-      }
+    const reminder = defaultReminders.get(event.guildId);
+    if (!reminder) {
+      continue;
+    }
 
-      const timingKey = `${event.guildId}:${event.id}:${offsetToMilliseconds(alert.amount, alert.unit)}`;
-      if (seenTimings.has(timingKey)) {
-        continue;
-      }
-      seenTimings.add(timingKey);
-
-      reminders.push({ guildId: event.guildId, event, alert });
+    const alertAt = new Date(event.scheduledStartAt.getTime() - offsetToMilliseconds(reminder.amount, reminder.unit));
+    if (alertAt.getTime() <= now.getTime() && now.getTime() < event.scheduledStartAt.getTime()) {
+      reminders.push({ guildId: event.guildId, event, amount: reminder.amount, unit: reminder.unit });
     }
   }
 
@@ -196,9 +192,12 @@ export async function runAlertPoll(client: Client, repository: AlertRepository, 
     await sendDueAlert(client, repository, dueAlert);
   }
 
-  // Channel reminders: post to every channel associated with a due event,
-  // independent of DM recipient gating. Each post is deduped per channel.
-  const dueChannelReminders = findDueChannelReminders(events, alertsByGuild, now);
+  // Channel reminders: driven by each guild's default reminder offset, decoupled
+  // from the DM alert list. Each post is deduped per channel.
+  const defaultReminders = new Map(
+    repository.listGuildDefaultReminders().map((reminder) => [reminder.guildId, reminder])
+  );
+  const dueChannelReminders = findDueChannelReminders(events, defaultReminders, now);
   for (const reminder of dueChannelReminders) {
     try {
       await sendChannelReminder(client, repository, reminder);
@@ -402,9 +401,8 @@ async function sendChannelReminder(
   reminder: DueChannelReminder
 ): Promise<void> {
   const associations = repository.listEventChannelsForEvent(reminder.guildId, reminder.event.id);
-  // Dedupe by effective timing (not alert id) so same-timing rules never
-  // double-post and the key is stable regardless of which rule wins.
-  const dedupeKey = channelReminderDedupeKey(reminder.alert);
+  // Dedupe keyed by the default offset so each channel gets one reminder.
+  const dedupeKey = channelReminderDedupeKey(reminder.amount, reminder.unit);
 
   for (const association of associations) {
     if (repository.hasSentChannelAlert(reminder.guildId, reminder.event.id, dedupeKey, association.channelId)) {
@@ -426,8 +424,8 @@ async function sendChannelReminder(
         dedupeKey,
         channelId: association.channelId,
         eventName: reminder.event.name,
-        offsetAmount: reminder.alert.amount,
-        offsetUnit: reminder.alert.unit
+        offsetAmount: reminder.amount,
+        offsetUnit: reminder.unit
       });
     } catch (error) {
       console.warn(
@@ -534,8 +532,8 @@ export function buildEventLink(guildId: string, eventId: string): string {
 
 // Dedupe key for a channel reminder: keyed by effective offset so same-timing
 // rules collapse to one delivery regardless of which rule fires.
-export function channelReminderDedupeKey(alert: Alert): string {
-  return `reminder:${offsetToMilliseconds(alert.amount, alert.unit)}`;
+export function channelReminderDedupeKey(amount: number, unit: AlertOffsetUnit): string {
+  return `reminder:${offsetToMilliseconds(amount, unit)}`;
 }
 
 // Dedupe key for an event update notice: keyed by the event's new state, so a

@@ -207,6 +207,30 @@ describe("main alert panel", () => {
 
     expect(JSON.stringify(components)).toContain("Requires the bot to have Manage Events permission");
   });
+
+  it("shows the default reminder as Not set and offers to set it", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+
+    const panel = buildMainPanel(repository, "guild-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    expect(JSON.stringify(components)).toContain("Default reminder");
+    expect(JSON.stringify(components)).toContain("Not set");
+    expect(JSON.stringify(components)).toContain("eventAlerts:setDefaultReminder");
+  });
+
+  it("shows the default reminder offset when set", () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.setDefaultReminderOffset("guild-1", { amount: 1, unit: "hours" });
+
+    const panel = buildMainPanel(repository, "guild-1");
+    const components = JSON.parse(JSON.stringify(panel.components));
+
+    expect(JSON.stringify(components)).toContain("1 hour before start");
+    expect(JSON.stringify(components)).toContain("eventAlerts:clearDefaultReminder");
+  });
 });
 
 describe("subscription panel", () => {

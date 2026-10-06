@@ -121,6 +121,11 @@ function applyV5Migration(db: Database.Database): void {
 }
 
 function applyV6Migration(db: Database.Database): void {
+  // A single guild-level default reminder offset drives channel reminders
+  // (decoupled from the DM alert list). NULL = not set.
+  addColumnIfMissing(db, "guild_settings", "default_reminder_amount INTEGER");
+  addColumnIfMissing(db, "guild_settings", "default_reminder_unit TEXT");
+
   // Channel reminder targets (event link → channel associations) and the
   // per-event tracking snapshot used to detect reschedules/cancellations.
   db.exec(`

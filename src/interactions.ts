@@ -38,7 +38,10 @@ const IDS = {
   confirmClearHistory: "eventAlerts:confirmClearHistory",
   history: "eventAlerts:history",
   back: "eventAlerts:back",
-  toggleAutoStart: "eventAlerts:toggleAutoStart"
+  toggleAutoStart: "eventAlerts:toggleAutoStart",
+  setDefaultReminder: "eventAlerts:setDefaultReminder",
+  clearDefaultReminder: "eventAlerts:clearDefaultReminder",
+  modalDefaultReminder: "eventAlerts:modal:defaultReminder"
 } as const;
 
 const SUBSCRIPTION_IDS = {
@@ -266,6 +269,18 @@ async function handleEventAlertsButton(interaction: ButtonInteraction, repositor
     await interaction.update(buildMainPanel(repository, guildId, interaction.user.id));
     return;
   }
+
+  if (interaction.customId === IDS.setDefaultReminder) {
+    const current = repository.getDefaultReminderOffset(guildId);
+    await interaction.showModal(buildDefaultReminderModal(current ? formatOffset(current.amount, current.unit) : undefined));
+    return;
+  }
+
+  if (interaction.customId === IDS.clearDefaultReminder) {
+    repository.setDefaultReminderOffset(guildId, null);
+    await interaction.update(buildMainPanel(repository, guildId, interaction.user.id));
+    return;
+  }
 }
 
 async function handleSubscriptionButton(interaction: ButtonInteraction, repository: AlertRepository): Promise<void> {
@@ -307,6 +322,12 @@ async function handleEventAlertsModalSubmit(
   } catch (error) {
     const message = error instanceof OffsetParseError ? error.message : "Invalid offset.";
     await interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (interaction.customId === IDS.modalDefaultReminder) {
+    repository.setDefaultReminderOffset(guildId, { amount: parsed.amount, unit: parsed.unit });
+    await respondToAdminModal(interaction, repository, guildId);
     return;
   }
 
@@ -620,6 +641,29 @@ export function buildMainPanel(
 
   headerContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
+  // Default reminder offset — drives channel reminders (decoupled from DM alerts).
+  const defaultReminder = repository.getDefaultReminderOffset(guildId);
+  headerContainer.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `**Default reminder**: ${
+        defaultReminder ? `${formatOffset(defaultReminder.amount, defaultReminder.unit)} before start` : "Not set"
+      }\nRegistered channels get one reminder at this time.`
+    )
+  );
+
+  const reminderButtons = [
+    new ButtonBuilder()
+      .setCustomId(IDS.setDefaultReminder)
+      .setLabel(defaultReminder ? "Change default reminder" : "Set default reminder")
+      .setStyle(ButtonStyle.Primary)
+  ];
+  if (defaultReminder) {
+    reminderButtons.push(
+      new ButtonBuilder().setCustomId(IDS.clearDefaultReminder).setLabel("Clear").setStyle(ButtonStyle.Danger)
+    );
+  }
+  components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...reminderButtons));
+
   const autoStartEnabled = repository.isAutoStartEnabled(guildId);
   const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -801,6 +845,23 @@ export function buildAdminAlertModal(customId: string, title: string, alert?: Al
 
 function buildOffsetModal(customId: string, title: string, value?: string, eventTarget: AlertEventTarget = "interested"): ModalBuilder {
   return buildAlertModal({ customId, title, value, eventTarget, recipientIds: [], includeRecipients: false, requireRecipients: false });
+}
+
+// Offset-only modal for the guild default reminder (no event-filter/recipient inputs).
+function buildDefaultReminderModal(currentValue?: string): ModalBuilder {
+  const offsetInput = new TextInputBuilder()
+    .setCustomId("offset")
+    .setLabel("Default reminder offset")
+    .setPlaceholder("30 minutes, 2 hours, or 1 day")
+    .setRequired(true)
+    .setStyle(TextInputStyle.Short);
+  if (currentValue) {
+    offsetInput.setValue(currentValue);
+  }
+  return new ModalBuilder()
+    .setCustomId(IDS.modalDefaultReminder)
+    .setTitle("Default reminder")
+    .addComponents(new ActionRowBuilder<ModalActionRowComponentBuilder>().addComponents(offsetInput));
 }
 
 function buildAlertModal(input: {

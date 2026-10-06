@@ -5,16 +5,16 @@
 ### Added
 
 - Channel reminder targets: posting a Discord event link in a channel registers that
-  channel for reminders. At each configured alert offset the event reminder is also
-  posted to every registered channel, and reschedule / location-change / cancellation
-  notices are sent when a tracked event changes.
+  channel for reminders. Registered channels get one reminder at the guild's
+  **default reminder offset** (admin-set in `/gregor-admin`), plus reschedule /
+  location-change / cancellation notices when a tracked event changes.
   - `parseEventLink` extracts event IDs from invite (`?event=`) and direct
     (`/events/<guild>/<event>`) links.
-  - New tables: `event_channels`, `event_tracking`, `sent_channel_alerts` (schema v6).
+  - New tables: `event_channels`, `event_tracking`, `sent_channel_alerts`, and a
+    `default_reminder_amount`/`default_reminder_unit` guild setting (schema v6).
   - Pure `findDueChannelReminders` and `detectEventChanges` scheduler functions.
-  - Channel reminders ignore the alert's `all`/`interested` filter — the channel
-    itself is the interested party — and same-timing rules collapse to a single
-    delivery per event.
+  - Channel reminders are **decoupled from the DM alert list** — member
+    subscriptions never add channel timings. No default set ⇒ no channel reminders.
   - Only non-recurring, `Scheduled` events are tracked. When a tracked event is
     cancelled, completed, or deleted, its channel registrations are removed; re-post
     the link to track a new occurrence. A reschedule/location/cancellation notice

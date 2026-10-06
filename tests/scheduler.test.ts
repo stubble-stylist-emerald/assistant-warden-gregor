@@ -216,55 +216,52 @@ describe("findEventsToAutoStart", () => {
 });
 
 describe("findDueChannelReminders", () => {
-  it("returns a due alert regardless of DM recipient interest", () => {
+  const defaultReminder = { amount: 30, unit: "minutes" as const };
+
+  it("returns a due reminder from the guild default offset", () => {
     const reminders = findDueChannelReminders(
-      [{ ...baseEvent, interestedUserIds: [] }],
-      new Map([["guild-1", [{ ...baseAlert, recipientIds: ["user-9"] }]]]),
+      [baseEvent],
+      new Map([["guild-1", defaultReminder]]),
       new Date("2026-01-01T11:45:00.000Z")
     );
 
     expect(reminders).toHaveLength(1);
+    expect(reminders[0]).toMatchObject({ guildId: "guild-1", amount: 30, unit: "minutes" });
     expect(reminders[0].event.id).toBe("event-1");
-    expect(reminders[0].alert.id).toBe("alert-1");
   });
 
-  it("returns nothing before the alert offset", () => {
-    const reminders = findDueChannelReminders(
+  it("returns nothing before the offset or when no default is set", () => {
+    const beforeOffset = findDueChannelReminders(
       [baseEvent],
-      new Map([["guild-1", [baseAlert]]]),
+      new Map([["guild-1", defaultReminder]]),
       new Date("2026-01-01T11:00:00.000Z")
+    );
+    const noDefault = findDueChannelReminders([baseEvent], new Map(), new Date("2026-01-01T11:45:00.000Z"));
+
+    expect(beforeOffset).toHaveLength(0);
+    expect(noDefault).toHaveLength(0);
+  });
+
+  it("returns nothing for non-scheduled events", () => {
+    const reminders = findDueChannelReminders(
+      [{ ...baseEvent, status: GuildScheduledEventStatus.Completed }],
+      new Map([["guild-1", defaultReminder]]),
+      new Date("2026-01-01T11:45:00.000Z")
     );
 
     expect(reminders).toHaveLength(0);
   });
 
-  it("returns nothing for disabled alerts or non-scheduled events", () => {
-    const disabled = findDueChannelReminders(
-      [baseEvent],
-      new Map([["guild-1", [{ ...baseAlert, enabled: false }]]]),
-      new Date("2026-01-01T11:45:00.000Z")
-    );
-    const completed = findDueChannelReminders(
-      [{ ...baseEvent, status: GuildScheduledEventStatus.Completed }],
-      new Map([["guild-1", [baseAlert]]]),
-      new Date("2026-01-01T11:45:00.000Z")
-    );
-
-    expect(disabled).toHaveLength(0);
-    expect(completed).toHaveLength(0);
-  });
-
-  it("collapses same-timing rules to one reminder per event", () => {
-    const allAlert = { ...baseAlert, id: "alert-all", eventTarget: "all" as const };
-    const interestedAlert = { ...baseAlert, id: "alert-interested", eventTarget: "interested" as const };
-
+  it("is independent of the guild's DM alerts and subscriptions", () => {
+    // No alerts at all — the channel reminder still fires from the default offset.
     const reminders = findDueChannelReminders(
       [baseEvent],
-      new Map([["guild-1", [allAlert, interestedAlert]]]),
+      new Map([["guild-1", { amount: 1, unit: "hours" as const }]]),
       new Date("2026-01-01T11:45:00.000Z")
     );
 
     expect(reminders).toHaveLength(1);
+    expect(reminders[0]).toMatchObject({ amount: 1, unit: "hours" });
   });
 });
 

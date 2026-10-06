@@ -14,9 +14,10 @@ can post reminders into channels.
 - **Admin configuration** — `/gregor-admin` lets members with the Manage Events
   permission create, edit, and delete alerts, and review sent history.
 - **Channel reminder targets** — post a Discord event link in a channel and
-  Gregor registers that channel for reminders. At each alert offset it posts a
-  reminder (a link that unfurls into Discord's native event card); it also posts
-  a notice if the event is rescheduled, changes location, or is cancelled.
+  Gregor registers that channel for reminders. Registered channels get one
+  reminder at the server's **default reminder offset** (set in `/gregor-admin`),
+  plus a notice if the event is rescheduled, changes location, or is cancelled.
+  Channel reminders are independent of DM alerts and member subscriptions.
 - **Auto-start events** — optionally, Gregor flips an event from Scheduled to
   Active when its start time arrives (opt-in per server).
 - **Sent history** — a browsable log of what was sent, to whom, and any failures.
@@ -114,8 +115,11 @@ The compose file installs dependencies, builds, and starts the bot using the
 
 Gregor polls scheduled events on an interval. For each event it checks the
 configured alert offsets; when an offset comes due, it DMs the matched
-recipients and posts to any registered channels. A sent-history record prevents
-the same reminder from going out twice.
+recipients. A sent-history record prevents the same DM from going out twice.
+
+**Channel reminders** are separate: each registered channel gets one reminder at
+the server's **default reminder offset** (set in `/gregor-admin`), regardless of
+the DM alerts or who subscribed. If no default is set, no channel reminders fire.
 
 Channel targets are registered by posting an event link in a channel — Gregor
 reacts with 👀 to confirm. Only non-recurring, `Scheduled` events are tracked;
