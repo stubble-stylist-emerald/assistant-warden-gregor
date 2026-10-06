@@ -40,7 +40,7 @@ const IDS = {
   back: "eventAlerts:back",
   toggleAutoStart: "eventAlerts:toggleAutoStart",
   setDefaultReminder: "eventAlerts:setDefaultReminder",
-  clearDefaultReminder: "eventAlerts:clearDefaultReminder",
+  resetDefaultReminder: "eventAlerts:resetDefaultReminder",
   modalDefaultReminder: "eventAlerts:modal:defaultReminder"
 } as const;
 
@@ -161,6 +161,14 @@ async function handleSubscribeCommand(
 
   repository.ensureGuild(guildId);
   await closePreviousPanel(guildId, interaction.user.id, "subscribe");
+
+  // New members go straight to the prefilled form (default offset) so they can
+  // just hit OK. Members who already have subscriptions get the management panel.
+  if (repository.listSubscribedAlerts(guildId, interaction.user.id).length === 0) {
+    await interaction.showModal(buildSubscriptionOffsetModal(repository, guildId));
+    return;
+  }
+
   await interaction.reply(asEphemeralV2(buildSubscriptionPanel(repository, guildId, interaction.user.id)));
   rememberActivePanel(guildId, interaction.user.id, "subscribe", interaction);
 }
@@ -272,11 +280,11 @@ async function handleEventAlertsButton(interaction: ButtonInteraction, repositor
 
   if (interaction.customId === IDS.setDefaultReminder) {
     const current = repository.getDefaultReminderOffset(guildId);
-    await interaction.showModal(buildDefaultReminderModal(current ? formatOffset(current.amount, current.unit) : undefined));
+    await interaction.showModal(buildDefaultReminderModal(formatOffset(current.amount, current.unit)));
     return;
   }
 
-  if (interaction.customId === IDS.clearDefaultReminder) {
+  if (interaction.customId === IDS.resetDefaultReminder) {
     repository.setDefaultReminderOffset(guildId, null);
     await interaction.update(buildMainPanel(repository, guildId, interaction.user.id));
     return;
@@ -292,7 +300,7 @@ async function handleSubscriptionButton(interaction: ButtonInteraction, reposito
   repository.ensureGuild(guildId);
 
   if (interaction.customId === SUBSCRIPTION_IDS.add) {
-    await interaction.showModal(buildSubscriptionOffsetModal());
+    await interaction.showModal(buildSubscriptionOffsetModal(repository, guildId));
     return;
   }
 
@@ -641,25 +649,26 @@ export function buildMainPanel(
 
   headerContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
-  // Default reminder offset — drives channel reminders (decoupled from DM alerts).
+  // Default reminder offset — drives channel reminders and prefills /subscribe.
   const defaultReminder = repository.getDefaultReminderOffset(guildId);
+  const isCustomDefault = repository.hasCustomDefaultReminder(guildId);
   headerContainer.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `**Default reminder**: ${
-        defaultReminder ? `${formatOffset(defaultReminder.amount, defaultReminder.unit)} before start` : "Not set"
-      }\nRegistered channels get one reminder at this time.`
+      `**Default reminder**: ${formatOffset(defaultReminder.amount, defaultReminder.unit)} before start${
+        isCustomDefault ? "" : " (default)"
+      }\nRegistered channels get one reminder at this time, and it prefills the /subscribe form.`
     )
   );
 
   const reminderButtons = [
     new ButtonBuilder()
       .setCustomId(IDS.setDefaultReminder)
-      .setLabel(defaultReminder ? "Change default reminder" : "Set default reminder")
+      .setLabel(isCustomDefault ? "Change default reminder" : "Change reminder")
       .setStyle(ButtonStyle.Primary)
   ];
-  if (defaultReminder) {
+  if (isCustomDefault) {
     reminderButtons.push(
-      new ButtonBuilder().setCustomId(IDS.clearDefaultReminder).setLabel("Clear").setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId(IDS.resetDefaultReminder).setLabel("Reset to default").setStyle(ButtonStyle.Secondary)
     );
   }
   components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...reminderButtons));
@@ -922,8 +931,14 @@ function buildAlertModal(input: {
   return modal;
 }
 
-function buildSubscriptionOffsetModal(): ModalBuilder {
-  return buildOffsetModal(SUBSCRIPTION_IDS.modalAdd, "Create alert", undefined, "interested");
+function buildSubscriptionOffsetModal(repository: AlertRepository, guildId: string): ModalBuilder {
+  const defaultReminder = repository.getDefaultReminderOffset(guildId);
+  return buildOffsetModal(
+    SUBSCRIPTION_IDS.modalAdd,
+    "Create alert",
+    formatOffset(defaultReminder.amount, defaultReminder.unit),
+    "interested"
+  );
 }
 
 function formatAlertSummary(alert: Alert, currentUserId?: string): string {

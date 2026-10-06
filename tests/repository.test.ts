@@ -438,33 +438,42 @@ describe("event channels", () => {
 });
 
 describe("default reminder offset", () => {
-  it("is unset by default", () => {
+  it("falls back to the built-in 24-hour default when unset", () => {
     const repository = createRepository();
     repository.ensureGuild("guild-1");
 
-    expect(repository.getDefaultReminderOffset("guild-1")).toBeNull();
-    expect(repository.listGuildDefaultReminders()).toEqual([]);
+    expect(repository.getDefaultReminderOffset("guild-1")).toEqual({ amount: 24, unit: "hours" });
+    expect(repository.hasCustomDefaultReminder("guild-1")).toBe(false);
+    expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 24, unit: "hours" }]);
   });
 
-  it("sets, reads, and clears the default reminder", () => {
+  it("sets, reads, and resets the default reminder", () => {
     const repository = createRepository();
     repository.ensureGuild("guild-1");
 
     repository.setDefaultReminderOffset("guild-1", { amount: 2, unit: "hours" });
     expect(repository.getDefaultReminderOffset("guild-1")).toEqual({ amount: 2, unit: "hours" });
+    expect(repository.hasCustomDefaultReminder("guild-1")).toBe(true);
     expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 2, unit: "hours" }]);
 
     repository.setDefaultReminderOffset("guild-1", null);
-    expect(repository.getDefaultReminderOffset("guild-1")).toBeNull();
-    expect(repository.listGuildDefaultReminders()).toEqual([]);
+    expect(repository.getDefaultReminderOffset("guild-1")).toEqual({ amount: 24, unit: "hours" });
+    expect(repository.hasCustomDefaultReminder("guild-1")).toBe(false);
+    expect(repository.listGuildDefaultReminders()).toEqual([{ guildId: "guild-1", amount: 24, unit: "hours" }]);
   });
 
-  it("lists defaults only for guilds that set one", () => {
+  it("lists the effective default for every guild", () => {
     const repository = createRepository();
     repository.ensureGuild("guild-1");
     repository.ensureGuild("guild-2");
     repository.setDefaultReminderOffset("guild-2", { amount: 30, unit: "minutes" });
 
-    expect(repository.listGuildDefaultReminders().map((r) => r.guildId)).toEqual(["guild-2"]);
+    expect(repository.listGuildDefaultReminders()).toEqual(
+      expect.arrayContaining([
+        { guildId: "guild-1", amount: 24, unit: "hours" },
+        { guildId: "guild-2", amount: 30, unit: "minutes" }
+      ])
+    );
+    expect(repository.listGuildDefaultReminders()).toHaveLength(2);
   });
 });

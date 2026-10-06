@@ -9,15 +9,18 @@ can post reminders into channels.
 - **DM reminders** — for each scheduled event, DM the configured recipients a
   chosen amount of time before it starts. Alerts can target everyone in the
   recipient list or only members who marked themselves "Interested".
-- **Self-service subscriptions** — any member can use `/subscribe` to pick their
-  own reminder timings without admin help.
+- **Self-service subscriptions** — any member can use `/subscribe`. Members with no
+  subscriptions get a form prefilled with the server's default reminder offset, so
+  they can just review and hit OK.
 - **Admin configuration** — `/gregor-admin` lets members with the Manage Events
-  permission create, edit, and delete alerts, and review sent history.
+  permission create, edit, and delete alerts, review sent history, and set the
+  server's default reminder offset.
 - **Channel reminder targets** — post a Discord event link in a channel and
   Gregor registers that channel for reminders. Registered channels get one
-  reminder at the server's **default reminder offset** (set in `/gregor-admin`),
-  plus a notice if the event is rescheduled, changes location, or is cancelled.
-  Channel reminders are independent of DM alerts and member subscriptions.
+  reminder at the server's **default reminder offset** (24 hours unless an admin
+  changes it in `/gregor-admin`), plus a notice if the event is rescheduled,
+  changes location, or is cancelled. Channel reminders are independent of DM
+  alerts and member subscriptions.
 - **Auto-start events** — optionally, Gregor flips an event from Scheduled to
   Active when its start time arrives (opt-in per server).
 - **Sent history** — a browsable log of what was sent, to whom, and any failures.
@@ -118,8 +121,11 @@ configured alert offsets; when an offset comes due, it DMs the matched
 recipients. A sent-history record prevents the same DM from going out twice.
 
 **Channel reminders** are separate: each registered channel gets one reminder at
-the server's **default reminder offset** (set in `/gregor-admin`), regardless of
-the DM alerts or who subscribed. If no default is set, no channel reminders fire.
+the server's **default reminder offset** — 24 hours before start unless an admin
+changes it in `/gregor-admin` — regardless of the DM alerts or who subscribed.
+
+The same default prefills the `/subscribe` form: a member with no subscriptions
+runs `/subscribe`, sees the offset filled in, and just hits OK.
 
 Channel targets are registered by posting an event link in a channel — Gregor
 reacts with 👀 to confirm. Only non-recurring, `Scheduled` events are tracked;

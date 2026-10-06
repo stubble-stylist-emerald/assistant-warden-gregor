@@ -14,13 +14,20 @@
     `default_reminder_amount`/`default_reminder_unit` guild setting (schema v6).
   - Pure `findDueChannelReminders` and `detectEventChanges` scheduler functions.
   - Channel reminders are **decoupled from the DM alert list** — member
-    subscriptions never add channel timings. No default set ⇒ no channel reminders.
+    subscriptions never add channel timings. Guilds default to **24 hours before**
+    unless an admin sets a different offset (configurable in `/gregor-admin`;
+    "Reset to default" restores 24 hours).
   - Only non-recurring, `Scheduled` events are tracked. When a tracked event is
     cancelled, completed, or deleted, its channel registrations are removed; re-post
     the link to track a new occurrence. A reschedule/location/cancellation notice
     that fails to deliver is retried on the next poll (already-delivered channels
     are not re-notified).
   - Sent history shows channel deliveries alongside DM reminders.
+- `/subscribe` now opens a **prefilled** alert form straight away for members with no
+  subscriptions — the offset field defaults to the guild's default reminder (24 hours
+  unless an admin changed it) so they can just review and hit OK. Members who already
+  have subscriptions still get the management panel, whose "Create alert" button also
+  prefills the same offset.
 - Auto-start scheduled events at their start time, opt-in per guild via `/gregor-admin` toggle.
   - Pure `findEventsToAutoStart` scheduler function with full unit test coverage.
   - `startEvent` handles Discord API errors gracefully (deleted events, missing permissions).

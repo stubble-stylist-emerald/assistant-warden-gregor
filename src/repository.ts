@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
+import { DEFAULT_REMINDER_OFFSET } from "./offset";
 import type { Alert, AlertEventTarget, AlertOffsetUnit, DefaultReminder, EventChannel, EventTracking, EventTrackingState, FailedRecipient, SentAlert, SentChannelAlert } from "./types";
 
 interface AlertRow {
@@ -345,16 +346,27 @@ export class AlertRepository {
     return rows.map((row) => row.guild_id);
   }
 
-  getDefaultReminderOffset(guildId: string): DefaultReminder | null {
+  // Effective guild default reminder offset. Always returns a value: guilds that
+  // never configured one fall back to DEFAULT_REMINDER_OFFSET (24 hours).
+  getDefaultReminderOffset(guildId: string): DefaultReminder {
     const row = this.db
       .prepare("SELECT default_reminder_amount, default_reminder_unit FROM guild_settings WHERE guild_id = ?")
       .get(guildId) as { default_reminder_amount: number | null; default_reminder_unit: AlertOffsetUnit | null } | undefined;
-    if (!row?.default_reminder_amount || !row.default_reminder_unit) {
-      return null;
+    if (row?.default_reminder_amount && row.default_reminder_unit) {
+      return { amount: row.default_reminder_amount, unit: row.default_reminder_unit };
     }
-    return { amount: row.default_reminder_amount, unit: row.default_reminder_unit };
+    return { ...DEFAULT_REMINDER_OFFSET };
   }
 
+  // Whether the guild has overridden the default (vs. using the built-in 24h).
+  hasCustomDefaultReminder(guildId: string): boolean {
+    const row = this.db
+      .prepare("SELECT default_reminder_amount, default_reminder_unit FROM guild_settings WHERE guild_id = ?")
+      .get(guildId) as { default_reminder_amount: number | null; default_reminder_unit: AlertOffsetUnit | null } | undefined;
+    return Boolean(row?.default_reminder_amount && row.default_reminder_unit);
+  }
+
+  // Passing null resets the guild to the built-in default (24 hours).
   setDefaultReminderOffset(guildId: string, reminder: DefaultReminder | null): void {
     this.ensureGuild(guildId);
     const now = new Date().toISOString();
@@ -367,14 +379,12 @@ export class AlertRepository {
 
   listGuildDefaultReminders(): Array<{ guildId: string } & DefaultReminder> {
     const rows = this.db
-      .prepare(
-        "SELECT guild_id, default_reminder_amount, default_reminder_unit FROM guild_settings WHERE default_reminder_amount IS NOT NULL AND default_reminder_unit IS NOT NULL"
-      )
-      .all() as Array<{ guild_id: string; default_reminder_amount: number; default_reminder_unit: AlertOffsetUnit }>;
+      .prepare("SELECT guild_id, default_reminder_amount, default_reminder_unit FROM guild_settings")
+      .all() as Array<{ guild_id: string; default_reminder_amount: number | null; default_reminder_unit: AlertOffsetUnit | null }>;
     return rows.map((row) => ({
       guildId: row.guild_id,
-      amount: row.default_reminder_amount,
-      unit: row.default_reminder_unit
+      amount: row.default_reminder_amount ?? DEFAULT_REMINDER_OFFSET.amount,
+      unit: row.default_reminder_unit ?? DEFAULT_REMINDER_OFFSET.unit
     }));
   }
 

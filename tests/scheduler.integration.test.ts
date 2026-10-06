@@ -102,6 +102,8 @@ describe("runAlertPoll integration", () => {
   it("retains tracking so a failed change notice is retried, without re-notifying delivered channels", async () => {
     const repository = createRepository();
     repository.registerEventChannel("guild-1", "event-A", "channel-1", state("2026-01-01T12:00:00.000Z"));
+    // Keep the reminder offset out of the way so the change notice is the only send.
+    repository.setDefaultReminderOffset("guild-1", { amount: 5, unit: "minutes" });
 
     let failNext = true;
     const deliveries: string[] = [];

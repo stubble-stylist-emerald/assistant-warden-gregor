@@ -9,6 +9,7 @@ import {
   buildMainPanel,
   buildSubscriptionPanel,
   canConfigureAlerts,
+  handleInteraction,
   moveSubscriptionToEventTarget,
   saveAdminAlert,
   subscribeUserToOffset
@@ -208,7 +209,7 @@ describe("main alert panel", () => {
     expect(JSON.stringify(components)).toContain("Requires the bot to have Manage Events permission");
   });
 
-  it("shows the default reminder as Not set and offers to set it", () => {
+  it("shows the built-in default reminder and offers to change it", () => {
     const repository = createRepository();
     repository.ensureGuild("guild-1");
 
@@ -216,11 +217,12 @@ describe("main alert panel", () => {
     const components = JSON.parse(JSON.stringify(panel.components));
 
     expect(JSON.stringify(components)).toContain("Default reminder");
-    expect(JSON.stringify(components)).toContain("Not set");
+    expect(JSON.stringify(components)).toContain("24 hours before start (default)");
     expect(JSON.stringify(components)).toContain("eventAlerts:setDefaultReminder");
+    expect(JSON.stringify(components)).not.toContain("eventAlerts:resetDefaultReminder");
   });
 
-  it("shows the default reminder offset when set", () => {
+  it("shows a custom default reminder with a reset affordance", () => {
     const repository = createRepository();
     repository.ensureGuild("guild-1");
     repository.setDefaultReminderOffset("guild-1", { amount: 1, unit: "hours" });
@@ -229,7 +231,8 @@ describe("main alert panel", () => {
     const components = JSON.parse(JSON.stringify(panel.components));
 
     expect(JSON.stringify(components)).toContain("1 hour before start");
-    expect(JSON.stringify(components)).toContain("eventAlerts:clearDefaultReminder");
+    expect(JSON.stringify(components)).not.toContain("(default)");
+    expect(JSON.stringify(components)).toContain("eventAlerts:resetDefaultReminder");
   });
 });
 
@@ -346,6 +349,66 @@ describe("subscription panel", () => {
     expect(movedAlert?.id).toBe(allAlert.id);
     expect(repository.getAlert(interestedAlert.id)).toBeNull();
     expect(repository.listSubscribedAlerts("guild-1", "user-1").map((alert) => alert.id)).toEqual([allAlert.id]);
+  });
+});
+
+function makeSubscribeCommand(guildId: string, userId: string): { interaction: unknown; calls: { modal: unknown; reply: unknown } } {
+  const calls: { modal: unknown; reply: unknown } = { modal: null, reply: null };
+  const interaction = {
+    isChatInputCommand: () => true,
+    isUserSelectMenu: () => false,
+    isStringSelectMenu: () => false,
+    isButton: () => false,
+    isModalSubmit: () => false,
+    commandName: "subscribe",
+    guildId,
+    user: { id: userId },
+    memberPermissions: null,
+    showModal: (modal: unknown) => {
+      calls.modal = modal;
+      return Promise.resolve();
+    },
+    reply: (payload: unknown) => {
+      calls.reply = payload;
+      return Promise.resolve();
+    }
+  };
+  return { interaction, calls };
+}
+
+describe("subscribe command", () => {
+  it("opens a prefilled form for members with no subscriptions", async () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    const { interaction, calls } = makeSubscribeCommand("guild-1", "user-1");
+
+    await handleInteraction(interaction as never, repository);
+
+    expect(JSON.stringify(calls.modal)).toContain('"value":"24 hours"');
+    expect(calls.reply).toBeNull();
+  });
+
+  it("prefills a custom guild default offset", async () => {
+    const repository = createRepository();
+    repository.ensureGuild("guild-1");
+    repository.setDefaultReminderOffset("guild-1", { amount: 1, unit: "hours" });
+    const { interaction, calls } = makeSubscribeCommand("guild-1", "user-1");
+
+    await handleInteraction(interaction as never, repository);
+
+    expect(JSON.stringify(calls.modal)).toContain('"value":"1 hour"');
+  });
+
+  it("shows the management panel for existing subscribers", async () => {
+    const repository = createRepository();
+    const alert = repository.addAlert("guild-1", 30, "minutes");
+    repository.setAlertRecipients(alert.id, ["user-1"]);
+    const { interaction, calls } = makeSubscribeCommand("guild-1", "user-1");
+
+    await handleInteraction(interaction as never, repository);
+
+    expect(calls.modal).toBeNull();
+    expect(JSON.stringify(calls.reply)).toContain("Event subscriptions");
   });
 });
 

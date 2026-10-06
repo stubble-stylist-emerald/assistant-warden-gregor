@@ -16,6 +16,10 @@ const UNIT_ALIASES: Record<string, AlertOffsetUnit> = {
 
 export class OffsetParseError extends Error {}
 
+// Fallback used when a guild has not configured its own default reminder
+// offset. Also prefills the /subscribe form so members can just hit OK.
+export const DEFAULT_REMINDER_OFFSET: { amount: number; unit: AlertOffsetUnit } = { amount: 24, unit: "hours" };
+
 // Parse concise human input into the canonical offset shape stored in SQLite.
 export function parseAlertOffset(input: string): { amount: number; unit: AlertOffsetUnit } {
   const match = input.trim().toLowerCase().match(/^(\d+)\s*([a-z]+)$/);
